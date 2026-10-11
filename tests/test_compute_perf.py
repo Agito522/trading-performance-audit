@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from datetime import date, datetime
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -217,7 +218,7 @@ class CastTests(unittest.TestCase):
 
 class SampleTests(unittest.TestCase):
     def test_stonkjournal_book_shape(self):
-        summary = cp.build_page(ROOT, today=date(2026, 10, 11))
+        summary = cp.build_page(ROOT, today=date(2026, 10, 11), fetch_quotes=False)
         self.assertEqual(summary["round_trips"], 5)
         self.assertAlmostEqual(summary["net_pnl"], 3865.05, places=2)
         self.assertEqual(summary["open_positions"], 24)
@@ -254,6 +255,7 @@ class SampleTests(unittest.TestCase):
             "MTD",
             "Last 30 days",
             "Full CSV range",
+            "Yahoo Finance",
             "Same day",
             "Overnight",
             "2–4d",
@@ -408,6 +410,124 @@ class PeriodFilterTests(unittest.TestCase):
         proc = subprocess.run(["node", path], capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout
+
+
+class OpenMarkTests(unittest.TestCase):
+    def test_unrealized_and_risk_formulas(self):
+        self.assertIsNone(cp.open_unrealized(50, 5, None))
+        self.assertAlmostEqual(cp.open_unrealized(50, 5, 60), 50)
+        self.assertAlmostEqual(cp.open_unrealized(50, 5, 40), -50)
+        self.assertIsNone(cp.open_risk(50, 5, None))
+        self.assertIsNone(cp.open_risk(534.3, 10, 534.33))
+        self.assertAlmostEqual(cp.open_risk(50, 5, 40), 50)
+        self.assertAlmostEqual(cp.open_risk(145.4, 50, 142), 170)
+
+    def test_parser_uses_close_not_adjusted(self):
+        try:
+            import pandas as pd
+        except ImportError:
+            self.skipTest("pandas not installed")
+        index = pd.to_datetime(["2026-10-08", "2026-10-09"])
+        columns = pd.MultiIndex.from_tuples(
+            [
+                ("Adj Close", "BBB"),
+                ("Close", "BBB"),
+                ("Adj Close", "CCC"),
+                ("Close", "CCC"),
+                ("Close", "ZERO"),
+            ],
+            names=["Price", "Ticker"],
+        )
+        frame = pd.DataFrame(
+            [
+                [1.0, 10.0, 3.0, 30.0, 1.0],
+                [2.0, 12.5, 4.0, 40.0, 0.0],
+            ],
+            index=index,
+            columns=columns,
+        )
+        prices, bar = cp.closes_from_yahoo_frame(frame, ["BBB", "CCC", "ZERO"])
+        self.assertEqual(prices["BBB"], 12.5)
+        self.assertEqual(prices["CCC"], 40.0)
+        self.assertNotIn("ZERO", prices)
+        self.assertEqual(bar, date(2026, 10, 9))
+        self.assertEqual(cp.closes_from_yahoo_frame(frame.iloc[0:0], ["BBB"]), ({}, None))
+
+    def test_yahoo_marks_stay_out_of_net_pnl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data").mkdir()
+            (root / "data" / "trades.csv").write_text(
+                "symbol,datetime,side,quantity,price,stop_price\n"
+                "AAA,2026-10-01 10:00:00,BUY,10,20,10\n"
+                "AAA,2026-10-02 10:00:00,SELL,10,23,\n",
+                encoding="utf-8",
+            )
+            book = [{"symbol": "BBB", "qty": 5, "avg_price": 50, "stop_price": 40, "opened_at": "2026-10-09T16:00:00"}]
+            (root / "data" / "open_positions.json").write_text(json.dumps(book), encoding="utf-8")
+            snap = {
+                "prices": {"BBB": 60.0},
+                "bar_date": date(2026, 10, 9),
+                "fetched_at": datetime(2026, 10, 11, 11, 0, tzinfo=cp.ET),
+                "error": None,
+                "missing": [],
+            }
+            with mock.patch.object(cp, "fetch_yahoo_last", return_value=snap) as fetch:
+                summary = cp.build_page(root, today=date(2026, 10, 11))
+            fetch.assert_called_once()
+            self.assertEqual(json.loads((root / "data" / "open_positions.json").read_text(encoding="utf-8")), book)
+            self.assertAlmostEqual(summary["net_pnl"], 30)
+            self.assertEqual(summary["round_trips"], 1)
+            self.assertAlmostEqual(summary["open_unreal"], 50)
+            self.assertEqual(summary["today_pnl"], 0)
+            html = (root / "docs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('id="kpi-net">+$30', html)
+            self.assertIn('id="open-unreal">+$50', html)
+            self.assertIn(">60.00<", html)
+            self.assertIn(">$50<", html)
+            self.assertIn("Yahoo Finance daily close through Oct 9, 2026", html)
+            self.assertIn("Open marks are not included in Net P&amp;L", html)
+            self.assertIn("Not included in net P&amp;L", html)
+            payload = json.loads(html.split('id="audit-data">', 1)[1].split("</script>", 1)[0])
+            self.assertEqual(len(payload["trips"]), 1)
+            self.assertAlmostEqual(payload["trips"][0]["pnl"], 30)
+            self.assertNotIn("unreal", payload["trips"][0])
+            self.assertNotIn("open_unreal", payload)
+
+    def test_missing_print_keeps_existing_last(self):
+        positions = [{"symbol": "BBB", "qty": 5, "avg_price": 50, "stop": 40, "last": 11}]
+        snap = {
+            "prices": {},
+            "bar_date": None,
+            "fetched_at": datetime(2026, 10, 11, 11, 0, tzinfo=cp.ET),
+            "error": None,
+            "missing": ["BBB"],
+        }
+        with mock.patch.object(cp, "fetch_yahoo_last", return_value=snap):
+            got = cp.apply_yahoo_last(positions)
+        self.assertEqual(positions[0]["last"], 11)
+        self.assertNotIn("last_source", positions[0])
+        self.assertEqual(got["missing"], ["BBB"])
+
+    def test_fetch_quotes_false_never_calls_yahoo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data").mkdir()
+            (root / "data" / "trades.csv").write_text(
+                "symbol,datetime,side,quantity,price\nAAA,2026-10-01 10:00:00,BUY,1,10\n",
+                encoding="utf-8",
+            )
+            (root / "data" / "open_positions.json").write_text(
+                json.dumps([{"symbol": "BBB", "qty": 1, "avg_price": 10}]),
+                encoding="utf-8",
+            )
+            with mock.patch.object(cp, "fetch_yahoo_last") as fetch:
+                summary = cp.build_page(root, today=date(2026, 10, 11), fetch_quotes=False)
+            fetch.assert_not_called()
+            self.assertIsNone(summary["open_unreal"])
+            self.assertAlmostEqual(summary["net_pnl"], 0)
+            html = (root / "docs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("so unrealized P&amp;L is blank", html)
 
 
 def math_isinf(value) -> bool:

@@ -4,8 +4,9 @@
 Reads data/trades.csv (a header with zero rows is valid), matches long
 BUY/SELL fills FIFO, and writes docs/index.html. The page embeds those
 closed round trips so a period control can recompute the audit in the
-browser. This script never places orders and does not require a live
-IBKR session.
+browser. Open-book Last prices are a Yahoo Finance snapshot taken when
+this script runs. This script never places orders and does not require
+a live IBKR session.
 
 R-multiple for a closed lot is (sell - buy) / (buy - initial_stop).
 The stop price comes from a matching open_positions.json row, else the
@@ -441,6 +442,150 @@ def load_positions(path: Path) -> list[dict]:
             }
         )
     return positions
+
+
+def open_unrealized(entry: float, qty: float, last: float | None) -> float | None:
+    """Open-book mark to market: (Last − entry) × shares. Not realized P&L."""
+    if last is None:
+        return None
+    return (float(last) - float(entry)) * float(qty)
+
+
+def open_risk(entry: float, qty: float, stop: float | None) -> float | None:
+    """Dollar risk to the stop. Blank unless the stop is below the entry."""
+    if stop is None or not (float(stop) < float(entry)):
+        return None
+    return (float(entry) - float(stop)) * float(qty)
+
+
+def _bar_date(ts) -> date | None:
+    if ts is None:
+        return None
+    tzinfo = getattr(ts, "tzinfo", None)
+    if tzinfo is not None:
+        try:
+            return ts.astimezone(ET).date()
+        except Exception:
+            return ts.date()
+    date_fn = getattr(ts, "date", None)
+    if callable(date_fn):
+        return date_fn()
+    return None
+
+
+def closes_from_yahoo_frame(frame, symbols: list[str]) -> tuple[dict[str, float], date | None]:
+    """Pull the latest daily Close for each ticker from a yfinance download frame."""
+    if frame is None or getattr(frame, "empty", True):
+        return {}, None
+    columns = frame.columns
+    if hasattr(columns, "get_level_values"):
+        levels = list(columns.get_level_values(0))
+        if "Close" not in levels:
+            return {}, None
+        close = frame["Close"]
+    elif "Close" in columns:
+        close = frame["Close"]
+    else:
+        return {}, None
+    if hasattr(close, "columns"):
+        out: dict[str, float] = {}
+        newest: date | None = None
+        for symbol in close.columns:
+            series = close[symbol].dropna()
+            if series.empty:
+                continue
+            price = float(series.iloc[-1])
+            if price <= 0:
+                continue
+            out[str(symbol)] = price
+            bar = _bar_date(series.index[-1])
+            if bar is not None and (newest is None or bar > newest):
+                newest = bar
+        return out, newest
+    series = close.dropna()
+    if series.empty or len(symbols) != 1:
+        return {}, None
+    price = float(series.iloc[-1])
+    if price <= 0:
+        return {}, None
+    return {symbols[0]: price}, _bar_date(series.index[-1])
+
+
+def fetch_yahoo_last(symbols: list[str]) -> dict:
+    """Latest Yahoo daily closes. Failure leaves prices empty; the page still builds."""
+    wanted = []
+    seen = set()
+    for symbol in symbols:
+        text = str(symbol or "").strip().upper()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        wanted.append(text)
+    fetched_at = datetime.now(ET)
+    empty = {"prices": {}, "bar_date": None, "fetched_at": fetched_at, "error": None, "missing": wanted}
+    if not wanted:
+        empty["missing"] = []
+        return empty
+    try:
+        import yfinance as yf
+    except ImportError:
+        empty["error"] = "yfinance is not installed"
+        print("Yahoo last skipped: yfinance is not installed.", file=sys.stderr)
+        return empty
+    frame = None
+    error = None
+    for _attempt in (1, 2):
+        try:
+            frame = yf.download(
+                wanted,
+                period="5d",
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+            error = None
+            break
+        except Exception as exc:
+            error = exc
+            frame = None
+    if error is not None or frame is None:
+        empty["error"] = str(error or "no data")
+        print(f"Yahoo last failed: {empty['error']}", file=sys.stderr)
+        return empty
+    try:
+        prices, bar_date = closes_from_yahoo_frame(frame, wanted)
+    except Exception as exc:
+        empty["error"] = str(exc)
+        print(f"Yahoo last failed: {exc}", file=sys.stderr)
+        return empty
+    missing = [symbol for symbol in wanted if symbol not in prices]
+    if missing:
+        print("Yahoo last missing: " + ", ".join(missing), file=sys.stderr)
+    print(
+        f"Yahoo last: {len(prices)} of {len(wanted)} symbols"
+        + (f", through {bar_date.isoformat()}" if bar_date else ""),
+        file=sys.stderr,
+    )
+    return {
+        "prices": prices,
+        "bar_date": bar_date,
+        "fetched_at": fetched_at,
+        "error": None,
+        "missing": missing,
+    }
+
+
+def apply_yahoo_last(positions: list[dict]) -> dict:
+    """Write Yahoo closes onto open positions. Existing marks stay when a symbol has no print."""
+    snap = fetch_yahoo_last([pos["symbol"] for pos in positions])
+    for pos in positions:
+        price = snap["prices"].get(pos["symbol"])
+        if price is None:
+            continue
+        pos["last"] = float(price)
+        pos["last_source"] = "yahoo"
+    return snap
 
 
 def load_safety(root: Path) -> dict | None:
@@ -1017,10 +1162,8 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
     open_rows = []
     for pos in positions:
         last = pos.get("last")
-        unreal = ((last - pos["avg_price"]) * pos["qty"]) if last is not None else None
-        risk = None
-        if pos.get("stop") is not None and pos["stop"] < pos["avg_price"]:
-            risk = (pos["avg_price"] - pos["stop"]) * pos["qty"]
+        unreal = open_unrealized(pos["avg_price"], pos["qty"], last)
+        risk = open_risk(pos["avg_price"], pos["qty"], pos.get("stop"))
         open_rows.append({**pos, "unreal": unreal, "risk": risk, "source": "open_positions"})
     if not open_rows:
         for lot in open_lots:
@@ -1033,7 +1176,7 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
                     "opened_at": lot.entry,
                     "last": None,
                     "unreal": None,
-                    "risk": (lot.buy - lot.stop) * lot.qty if lot.stop < lot.buy else None,
+                    "risk": open_risk(lot.buy, lot.qty, lot.stop),
                     "source": "fills",
                 }
             )
@@ -1790,6 +1933,52 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
 """
 
 
+def open_last_caption(audit: dict) -> str:
+    """Plain-text note: Last is a static Yahoo snapshot, not a browser quote."""
+    quote = audit.get("quote") or {}
+    fetched = quote.get("fetched_at")
+    fetched_s = fetched.strftime("%b %d, %Y %H:%M ET") if isinstance(fetched, datetime) else ""
+    bar = quote.get("bar_date")
+    if bar is not None and fetched_s:
+        text = (
+            f"Last is the Yahoo Finance daily close through {fmt_date(bar)}, "
+            f"snapshotted {fetched_s} by compute_perf.py. "
+        )
+    elif quote.get("error"):
+        text = f"Yahoo Finance snapshot failed ({quote['error']}). Last stays blank. "
+    else:
+        text = "Last is the Yahoo Finance daily close from the last compute_perf.py run. "
+    text += (
+        "Unrealized is (Last − entry) × shares. "
+        "Risk $ is (entry − stop) × shares when the stop is below the entry. "
+        "The browser does not fetch quotes. Open marks are not included in Net P&L."
+    )
+    missing = list(quote.get("missing") or [])
+    if missing:
+        text += " No print for " + ", ".join(missing) + "."
+    return text
+
+
+def open_book_note(audit: dict) -> str:
+    rows = audit["open_rows"]
+    marks = [row.get("unreal") for row in rows if row.get("unreal") is not None]
+    if not marks:
+        return (
+            '<p class="note" id="open-unreal-note">No Yahoo last price on the open book, '
+            "so unrealized P&amp;L is blank. Not included in net P&amp;L.</p>"
+        )
+    total = pysum(marks)
+    missing = [row["symbol"] for row in rows if row.get("unreal") is None]
+    extra = ""
+    if missing:
+        extra = " No print for " + esc(", ".join(missing)) + "."
+    return (
+        f'<p class="today-num {_cls_money(total)}" id="open-unreal">{fmt_money(total)}</p>'
+        '<p class="note" id="open-unreal-note">Unrealized on the open book, (Last − entry) × shares. '
+        f"Not included in net P&amp;L.{extra}</p>"
+    )
+
+
 def render_html(audit: dict) -> str:
     end_candidates = []
     if audit["last_exit"]:
@@ -1861,12 +2050,7 @@ def render_html(audit: dict) -> str:
             return sentence
         return sentence + " — column missing, rule skipped"
 
-    marks = [row.get("unreal") for row in audit["open_rows"]]
-    if marks and all(mark is not None for mark in marks):
-        unreal_total = pysum(marks)
-        unreal_line = f'<p class="today-num {_cls_money(unreal_total)}">{fmt_money(unreal_total)}</p><p class="note">Unrealized on the open book, from the last marks. Not included in net P&amp;L.</p>'
-    else:
-        unreal_line = '<p class="note">No last prices on the open book, so unrealized P&amp;L is blank.</p>'
+    unreal_line = open_book_note(audit)
     generated = datetime.now(ET).strftime("%b %d, %Y %H:%M ET")
     exit_min = audit["closed"][0].exit.date() if audit["closed"] else None
     exit_max = audit["closed"][-1].exit.date() if audit["closed"] else None
@@ -2050,6 +2234,7 @@ def render_html(audit: dict) -> str:
     <section class="card">
       <p class="section-k">Open positions</p>
       <h2>Still on the book</h2>
+      <p class="note" id="open-last-note">{esc(open_last_caption(audit))}</p>
       {open_table(audit["open_rows"])}
     </section>
     <section class="card">
@@ -2082,16 +2267,22 @@ def public_summary(audit: dict) -> dict:
         "avoid_pnl": float(audit["avoid"]["pnl"]),
         "today_pnl": float(audit["today_pnl"]),
         "open_positions": len(audit["open_rows"]),
+        "open_unreal": None
+        if not any(row.get("unreal") is not None for row in audit["open_rows"])
+        else float(pysum(row["unreal"] for row in audit["open_rows"] if row.get("unreal") is not None)),
     }
     return to_py(summary)
 
 
-def build_page(root: Path | None = None, today: date | None = None) -> dict:
+def build_page(root: Path | None = None, today: date | None = None, fetch_quotes: bool = True) -> dict:
     root = root or repo_root()
     fills, columns = load_fills(root / "data" / "trades.csv")
     positions = load_positions(root / "data" / "open_positions.json")
+    quote = apply_yahoo_last(positions) if fetch_quotes else None
     safety = load_safety(root)
     audit = assemble(fills, columns, positions, safety, today=today)
+    if quote is not None:
+        audit["quote"] = quote
     html_text = render_html(audit)
     docs = root / "docs"
     docs.mkdir(parents=True, exist_ok=True)
@@ -2108,7 +2299,8 @@ def main() -> int:
     summary = build_page()
     print(
         f"Net P&L {summary['net_pnl']:.2f} | round trips {summary['round_trips']} | "
-        f"win rate {summary['win_rate']} | open {summary['open_positions']}"
+        f"win rate {summary['win_rate']} | open {summary['open_positions']} | "
+        f"open unreal {summary['open_unreal']}"
     )
     print("READY")
     return 0

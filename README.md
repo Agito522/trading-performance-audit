@@ -10,7 +10,9 @@ Page: [https://agito522.github.io/trading-performance-audit/](https://agito522.g
 python compute_perf.py
 ```
 
-The script prints `READY` and writes `docs/index.html`. A CSV that is empty, or that contains only a header, still produces the page.
+The script prints `READY` and writes `docs/index.html`. A CSV that is empty, or that contains only a header, still produces the page. Install the quote dependency once with `pip install -r requirements.txt`.
+
+On that run the script asks Yahoo Finance for the latest daily **close** of each symbol in `data/open_positions.json` and writes it into the open-book **Last** column. **Unrealized** is `(Last − entry) × shares`. **Risk $** is `(entry − stop) × shares` when the stop is below the entry. Both belong to the open book only. Net P&L, today’s P&L, and every period-filter stat stay realized closes. The browser does not call Yahoo; GitHub Pages serves the static snapshot from the last `python compute_perf.py` run. If Yahoo or `yfinance` is unavailable, Last stays blank and the page still builds.
 
 The page opens on **Full CSV range**. The control under the title — This week, MTD, Last 30 days, Full CSV range, and Custom from–to — recomputes the audit in the browser from closed FIFO round trips whose **exit** falls in that window. Net P&L stays realized; open marks are not added. This week and MTD run through today in America/New_York. Last 30 days is the 30 calendar days ending today.
 
@@ -83,7 +85,7 @@ Edge Profile medians are computed from the **buy**. If a column is not in the he
 
 `stop_price` (or the open-position stop) is what makes R, the histogram, “stop on the fill,” and “losers held to the stop” meaningful.
 
-The bot strip is the safety log, not the fills. Today’s P&L is realized only; marks on open positions are not added to it.
+The bot strip is the safety log, not the fills. Today’s P&L is realized only. Open-book Unrealized, from the Yahoo Last versus entry, is not added to it.
 
 ## Rebuild the sample
 
