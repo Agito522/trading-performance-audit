@@ -2,8 +2,10 @@
 """Build a static 2026 Trading Performance Audit from fills.
 
 Reads data/trades.csv (a header with zero rows is valid), matches long
-BUY/SELL fills FIFO, and writes docs/index.html. This script never places
-orders and does not require a live IBKR session.
+BUY/SELL fills FIFO, and writes docs/index.html. The page embeds those
+closed round trips so a period control can recompute the audit in the
+browser. This script never places orders and does not require a live
+IBKR session.
 
 R-multiple for a closed lot is (sell - buy) / (buy - initial_stop).
 The stop price comes from a matching open_positions.json row, else the
@@ -754,11 +756,37 @@ def _median_metric(rows: list[RoundTrip], key: str, columns: set[str]):
     return pystats_median(vals)
 
 
-def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety: dict | None, today: date | None = None) -> dict:
-    closed, open_lots, unmatched = match_fifo(fills, positions)
+def filter_exits(closed: list[RoundTrip], start: date | None, end: date | None) -> list[RoundTrip]:
+    """Closed round trips whose exit date falls in the inclusive window."""
+    chosen = []
     for rt in closed:
-        rt.setup = classify_setup(rt, columns)
-    today = today or datetime.now(ET).date()
+        day = rt.exit.date()
+        if start is not None and day < start:
+            continue
+        if end is not None and day > end:
+            continue
+        chosen.append(rt)
+    return chosen
+
+
+def preset_bounds(name: str, today: date) -> tuple[date | None, date | None]:
+    """Inclusive exit dates for a period preset. Full range is unbounded.
+
+    This week and MTD run through today. Last 30 days is the 30 calendar
+    days ending today, including today.
+    """
+    if name == "all":
+        return None, None
+    if name == "week":
+        return today - timedelta(days=today.weekday()), today
+    if name == "mtd":
+        return today.replace(day=1), today
+    if name == "d30":
+        return today - timedelta(days=29), today
+    raise ValueError(name)
+
+
+def metrics_from_closed(closed: list[RoundTrip], columns: set[str]) -> dict:
     risks = [dollar_risk(rt) for rt in closed]
     median_risk = pystats_median(risks) if risks else None
     oversized_cut = (2 * median_risk) if median_risk else None
@@ -934,43 +962,8 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
     win_hold = pystats_median([rt.hold_sessions for rt in wins]) if wins else None
     loss_hold = pystats_median([rt.hold_sessions for rt in losses]) if losses else None
 
-    today_rows = [rt for rt in closed if rt.exit.date() == today]
-    last_day = closed[-1].exit.date() if closed else None
-    last_rows = [rt for rt in closed if last_day and rt.exit.date() == last_day]
-
-    open_rows = []
-    for pos in positions:
-        last = pos.get("last")
-        unreal = ((last - pos["avg_price"]) * pos["qty"]) if last is not None else None
-        risk = None
-        if pos.get("stop") is not None and pos["stop"] < pos["avg_price"]:
-            risk = (pos["avg_price"] - pos["stop"]) * pos["qty"]
-        open_rows.append({**pos, "unreal": unreal, "risk": risk, "source": "open_positions"})
-    if not open_rows:
-        for lot in open_lots:
-            open_rows.append(
-                {
-                    "symbol": lot.symbol,
-                    "qty": lot.qty,
-                    "avg_price": lot.buy,
-                    "stop": lot.stop,
-                    "opened_at": lot.entry,
-                    "last": None,
-                    "unreal": None,
-                    "risk": (lot.buy - lot.stop) * lot.qty if lot.stop < lot.buy else None,
-                    "source": "fills",
-                }
-            )
-
     recent = list(reversed(closed[-20:]))
-    audit = {
-        "closed": closed,
-        "open_lots": open_lots,
-        "open_rows": open_rows,
-        "columns": columns,
-        "safety": safety,
-        "today": today,
-        "unmatched_sell_qty": unmatched,
+    return {
         "net": net,
         "round_trips": len(closed),
         "win_rate": win_rate,
@@ -1008,6 +1001,52 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
             "loss_hold": loss_hold,
             "commissions": pysum(rt.commission for rt in closed) if closed else 0.0,
         },
+    }
+
+
+def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety: dict | None, today: date | None = None) -> dict:
+    closed, open_lots, unmatched = match_fifo(fills, positions)
+    for rt in closed:
+        rt.setup = classify_setup(rt, columns)
+    today = today or datetime.now(ET).date()
+    metrics = metrics_from_closed(closed, columns)
+    today_rows = [rt for rt in closed if rt.exit.date() == today]
+    last_day = closed[-1].exit.date() if closed else None
+    last_rows = [rt for rt in closed if last_day and rt.exit.date() == last_day]
+
+    open_rows = []
+    for pos in positions:
+        last = pos.get("last")
+        unreal = ((last - pos["avg_price"]) * pos["qty"]) if last is not None else None
+        risk = None
+        if pos.get("stop") is not None and pos["stop"] < pos["avg_price"]:
+            risk = (pos["avg_price"] - pos["stop"]) * pos["qty"]
+        open_rows.append({**pos, "unreal": unreal, "risk": risk, "source": "open_positions"})
+    if not open_rows:
+        for lot in open_lots:
+            open_rows.append(
+                {
+                    "symbol": lot.symbol,
+                    "qty": lot.qty,
+                    "avg_price": lot.buy,
+                    "stop": lot.stop,
+                    "opened_at": lot.entry,
+                    "last": None,
+                    "unreal": None,
+                    "risk": (lot.buy - lot.stop) * lot.qty if lot.stop < lot.buy else None,
+                    "source": "fills",
+                }
+            )
+
+    audit = {
+        "closed": closed,
+        "open_lots": open_lots,
+        "open_rows": open_rows,
+        "columns": columns,
+        "safety": safety,
+        "today": today,
+        "unmatched_sell_qty": unmatched,
+        **metrics,
         "today_pnl": pysum(rt.pnl for rt in today_rows) if today_rows else 0.0,
         "today_trades": len(today_rows),
         "last_day": last_day,
@@ -1017,6 +1056,57 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
         "last_exit": closed[-1].exit.date() if closed else None,
     }
     return audit
+
+
+def audit_payload(audit: dict) -> str:
+    """JSON for the in-browser period filter. Closed trips only, no open marks."""
+    hold_labels = dict(HOLD_ORDER)
+    trips = []
+    for rt in audit["closed"]:
+        minutes = entry_minutes(rt)
+        gap = rt.extras.get("gap_pct")
+        rsi = rt.extras.get("rsi")
+        extras = {
+            key: to_py(rt.extras.get(key))
+            for key in ("adr", "rsi", "ema_dist_pct", "sma_dist_pct", "dollar_volume", "gap_pct", "week52_pct")
+        }
+        trips.append(
+            {
+                "symbol": rt.symbol,
+                "entryDate": rt.entry.date().isoformat(),
+                "exitDate": rt.exit.date().isoformat(),
+                "pnl": to_py(rt.pnl),
+                "r": to_py(rt.r),
+                "commission": to_py(rt.commission),
+                "sell": to_py(rt.sell),
+                "stop": to_py(rt.stop),
+                "stopSource": rt.stop_source,
+                "hasTime": bool(rt.has_time),
+                "holdSessions": int(rt.hold_sessions),
+                "holdKey": hold_bucket(rt.hold_sessions),
+                "holdLabel": hold_labels[hold_bucket(rt.hold_sessions)],
+                "timeBucket": time_bucket(rt),
+                "weekday": rt.entry.strftime("%A"),
+                "regime": REGIME_LABEL.get(rt.extras.get("spy_regime") or "", "Unknown"),
+                "setup": rt.setup,
+                "revenge": bool(rt.revenge),
+                "risk": to_py(dollar_risk(rt)),
+                "late": bool(minutes is not None and minutes >= 14 * 60 + 30),
+                "fridayAfternoon": bool(rt.entry.weekday() == 4 and minutes is not None and minutes >= 13 * 60),
+                "gapChase": bool(gap is not None and gap > 8),
+                "hotRsi": bool(rsi is not None and rsi > 78),
+                "hold10": bool(rt.hold_sessions >= 10),
+                "extras": extras,
+            }
+        )
+    payload = {
+        "trips": trips,
+        "columns": sorted(audit["columns"]),
+        "exitMin": trips[0]["exitDate"] if trips else None,
+        "exitMax": trips[-1]["exitDate"] if trips else None,
+    }
+    raw = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+    return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def fmt_money(value, digits=0) -> str:
@@ -1626,6 +1716,62 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .r-na { background: #1a1e28; color: var(--muted); }
 .empty { color: var(--muted); margin: 0.4rem 0; }
 .foot { color: var(--muted); font-size: 0.85rem; margin-top: 1.2rem; font-family: var(--mono); }
+.period {
+  margin: 0.35rem 0 1rem;
+  padding: 0.9rem 1rem 0.85rem;
+  background: #10151f;
+  border: 1px solid rgba(252, 238, 10, 0.7);
+  box-shadow: var(--shadow);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+}
+.presets { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.55rem 0 0.15rem; }
+.presets button {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: #070b12;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  padding: 0.48rem 0.72rem;
+  cursor: pointer;
+}
+.presets button[aria-pressed="true"] {
+  background: var(--yellow);
+  color: #0a0c10;
+  border-color: var(--yellow);
+  font-weight: 700;
+}
+.presets button:focus-visible, .period-custom input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.period-custom { display: flex; flex-wrap: wrap; gap: 0.8rem 1rem; align-items: flex-end; margin-top: 0.75rem; }
+.period-custom label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.period-custom input {
+  color: var(--ink);
+  background: #070b12;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  padding: 0.38rem 0.5rem;
+  color-scheme: dark;
+}
+.period-window {
+  margin: 0.75rem 0 0.2rem;
+  font-family: var(--mono);
+  color: var(--yellow);
+  letter-spacing: 0.03em;
+}
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1722,7 +1868,20 @@ def render_html(audit: dict) -> str:
     else:
         unreal_line = '<p class="note">No last prices on the open book, so unrealized P&amp;L is blank.</p>'
     generated = datetime.now(ET).strftime("%b %d, %Y %H:%M ET")
-    return f"""<!DOCTYPE html>
+    exit_min = audit["closed"][0].exit.date() if audit["closed"] else None
+    exit_max = audit["closed"][-1].exit.date() if audit["closed"] else None
+    if exit_min and exit_max:
+        noun = "closed exit" if audit["round_trips"] == 1 else "closed exits"
+        period_line = f"Full CSV range · {fmt_date(exit_min)} – {fmt_date(exit_max)} · {audit['round_trips']} {noun}"
+    else:
+        period_line = "Full CSV range · no closed exits"
+    from_value = exit_min.isoformat() if exit_min else ""
+    to_value = exit_max.isoformat() if exit_max else ""
+    payload = audit_payload(audit)
+    script = (ROOT / "period_filter.js").read_text(encoding="utf-8")
+    if "</" + "script>" in script.lower():
+        raise RuntimeError("period filter script cannot contain a script end tag")
+    page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -1744,27 +1903,43 @@ def render_html(audit: dict) -> str:
       <h1>2026 Trading Performance Audit</h1>
       <p class="sub">{esc(span)} · US equities · FIFO round trips · StonkJournal</p>
     </header>
+    <section class="period" id="period" aria-label="Period">
+      <p class="section-k">Period</p>
+      <div class="presets" role="group" aria-label="Period presets">
+        <button type="button" data-preset="week" aria-pressed="false">This week</button>
+        <button type="button" data-preset="mtd" aria-pressed="false">MTD</button>
+        <button type="button" data-preset="d30" aria-pressed="false">Last 30 days</button>
+        <button type="button" data-preset="all" aria-pressed="true">Full CSV range</button>
+        <button type="button" data-preset="custom" aria-pressed="false">Custom</button>
+      </div>
+      <div class="period-custom" id="period-custom">
+        <label>From <input type="date" id="period-from" value="{esc(from_value)}"></label>
+        <label>To <input type="date" id="period-to" value="{esc(to_value)}"></label>
+      </div>
+      <p class="period-window" id="period-window">{esc(period_line)}</p>
+      <p class="note">Closed FIFO round trips whose exit falls in the window. Net P&amp;L is realized only. Unsettled open marks are not included.</p>
+    </section>
     {bot_html(audit["safety"])}
     <section class="kpi-strip" aria-label="Key results">
-      <article class="kpi"><p class="k">Net P&amp;L</p><p class="v {_cls_money(audit["net"])}">{fmt_money(audit["net"])}</p><p class="s">after commissions</p></article>
-      <article class="kpi"><p class="k">Round Trips</p><p class="v">{audit["round_trips"]}</p><p class="s">FIFO closed lots</p></article>
-      <article class="kpi"><p class="k">Win Rate</p><p class="v">{wr}</p><p class="s">P&amp;L above zero</p></article>
-      <article class="kpi"><p class="k">Profit Factor</p><p class="v">{pf_txt}</p><p class="s">gross win / gross loss</p></article>
-      <article class="kpi"><p class="k">Expectancy</p><p class="v {_cls_money(audit["expectancy"])}">{exp}</p><p class="s">{esc(exp_r or "per round trip")}</p></article>
-      <article class="kpi"><p class="k">Max Drawdown</p><p class="v neg">{dd_txt}</p><p class="s">{esc(dd_sub)}</p></article>
+      <article class="kpi"><p class="k">Net P&amp;L</p><p class="v {_cls_money(audit["net"])}" id="kpi-net">{fmt_money(audit["net"])}</p><p class="s">realized, after commissions</p></article>
+      <article class="kpi"><p class="k">Round Trips</p><p class="v" id="kpi-trips">{audit["round_trips"]}</p><p class="s">FIFO closed lots</p></article>
+      <article class="kpi"><p class="k">Win Rate</p><p class="v" id="kpi-win">{wr}</p><p class="s">P&amp;L above zero</p></article>
+      <article class="kpi"><p class="k">Profit Factor</p><p class="v" id="kpi-pf">{pf_txt}</p><p class="s">gross win / gross loss</p></article>
+      <article class="kpi"><p class="k">Expectancy</p><p class="v {_cls_money(audit["expectancy"])}" id="kpi-exp">{exp}</p><p class="s" id="kpi-exp-sub">{esc(exp_r or "per round trip")}</p></article>
+      <article class="kpi"><p class="k">Max Drawdown</p><p class="v neg" id="kpi-dd">{dd_txt}</p><p class="s" id="kpi-dd-sub">{esc(dd_sub)}</p></article>
     </section>
     <section class="card">
       <p class="section-k">Equity curve</p>
       <h2>Weekly cumulative P&amp;L</h2>
-      <p class="note">Realized round trips, summed through each Friday.{esc(trough)}</p>
-      {equity_svg(audit["weekly"])}
+      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
+      <div id="equity-chart">{equity_svg(audit["weekly"])}</div>
     </section>
     <section class="pair">
       <article class="card focus">
         <p class="section-k">Focus</p>
         <h2>Keep taking these</h2>
-        <p class="big pos">{fmt_money(audit["focus"]["pnl"])}</p>
-        <p class="note">{audit["focus"]["trades"]} trades · {focus_wr}</p>
+        <p class="big pos" id="focus-pnl">{fmt_money(audit["focus"]["pnl"])}</p>
+        <p class="note" id="focus-meta">{audit["focus"]["trades"]} trades · {focus_wr}</p>
         <ul class="criteria">
           <li>Entry 9:35–10:45 ET</li>
           <li>{maybe("spy_regime", "SPY day regime is up")}</li>
@@ -1776,8 +1951,8 @@ def render_html(audit: dict) -> str:
       <article class="card avoid">
         <p class="section-k">Avoid</p>
         <h2>These paid for the lesson</h2>
-        <p class="big neg">{fmt_money(audit["avoid"]["pnl"])}</p>
-        <p class="note">{audit["avoid"]["trades"]} trades · {avoid_wr}</p>
+        <p class="big neg" id="avoid-pnl">{fmt_money(audit["avoid"]["pnl"])}</p>
+        <p class="note" id="avoid-meta">{audit["avoid"]["trades"]} trades · {avoid_wr}</p>
         <ul class="criteria">
           <li>Entry at or after 2:30pm ET</li>
           <li>{maybe("gap_pct", "Opening gap above 8%")}</li>
@@ -1790,14 +1965,14 @@ def render_html(audit: dict) -> str:
     <section class="card">
       <p class="section-k">Hidden leaks</p>
       <h2>Where the book gave it back</h2>
-      <p class="note">A round trip can sit in more than one leak. Dollars are realized P&amp;L.</p>
-      {leaks_html(audit["leaks"])}
+      <p class="note">A round trip can sit in more than one leak. Dollars are realized P&amp;L of exits in the window.</p>
+      <div id="leaks">{leaks_html(audit["leaks"])}</div>
     </section>
     <section class="card">
       <p class="section-k">Holding period</p>
       <h2>P&amp;L by Holding Period</h2>
       <p class="note">Sessions are weekdays from entry to exit. Profit extends right, loss extends left.</p>
-      {diverging_html(audit["holds"], "label")}
+      <div id="holds">{diverging_html(audit["holds"], "label")}</div>
     </section>
     <section>
       <div class="card" style="margin-bottom:0.4rem">
@@ -1806,16 +1981,16 @@ def render_html(audit: dict) -> str:
         <p class="note">SPY-day regime, entry clock, and weekday. Regime is N/A without a spy_regime column — it is not inferred from fills.</p>
       </div>
       <div class="triple">
-        <article class="card"><h2 style="font-size:1.15rem">SPY-day regime</h2>{diverging_html(audit["regimes"])}</article>
-        <article class="card"><h2 style="font-size:1.15rem">Entry time</h2>{diverging_html(audit["times"])}</article>
-        <article class="card"><h2 style="font-size:1.15rem">Day of week</h2>{diverging_html(audit["dows"])}</article>
+        <article class="card"><h2 style="font-size:1.15rem">SPY-day regime</h2><div id="regimes">{diverging_html(audit["regimes"])}</div></article>
+        <article class="card"><h2 style="font-size:1.15rem">Entry time</h2><div id="times">{diverging_html(audit["times"])}</div></article>
+        <article class="card"><h2 style="font-size:1.15rem">Day of week</h2><div id="dows">{diverging_html(audit["dows"])}</div></article>
       </div>
     </section>
     <section class="card">
       <p class="section-k">Edge profile</p>
       <h2>Winners vs losers at entry</h2>
       <p class="note">Median of the entry print. N/A means that column is not in the file.</p>
-      <div class="table-wrap"><table class="edge"><thead><tr><th>Measure</th><th>Winners</th><th>Losers</th><th>Spread</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="edge"><thead><tr><th>Measure</th><th>Winners</th><th>Losers</th><th>Spread</th></tr></thead><tbody id="edge-body">
       {edge_html(audit["edge"])}
       </tbody></table></div>
     </section>
@@ -1824,30 +1999,30 @@ def render_html(audit: dict) -> str:
         <article class="card">
           <p class="section-k">P&amp;L by stock</p>
           <h2>Best 5</h2>
-          {diverging_html(audit["best"]) if audit["best"] else '<p class="empty">No winning symbols.</p>'}
+          <div id="best">{diverging_html(audit["best"]) if audit["best"] else '<p class="empty">No winning symbols.</p>'}</div>
         </article>
         <article class="card">
           <h2>Worst 5</h2>
-          {diverging_html(audit["worst"]) if audit["worst"] else '<p class="empty">No losing symbols.</p>'}
+          <div id="worst">{diverging_html(audit["worst"]) if audit["worst"] else '<p class="empty">No losing symbols.</p>'}</div>
         </article>
       </div>
       <aside class="card">
         <p class="section-k">From the fills</p>
         <h2>Concentration &amp; discipline</h2>
         <div class="stats">
-          <div class="stat"><span>Symbols traded</span><strong>{conc["symbols"]}</strong></div>
-          <div class="stat"><span>Top symbol</span><strong>{esc(top1_txt)}</strong></div>
-          <div class="stat"><span>Top 3 share of gross</span><strong>{"—" if conc["top3_share"] is None else f'{conc["top3_share"]:.0f}%'}</strong></div>
-          <div class="stat"><span>Busiest symbol</span><strong>{esc(busiest_sym)}</strong></div>
-          <div class="stat"><span>Busiest entry day</span><strong>{esc(busiest_day)}</strong></div>
-          <div class="stat"><span>Trades per week</span><strong>{"—" if trow is None else f"{trow:.1f}"}</strong></div>
-          <div class="stat"><span>Median dollar risk</span><strong>{fmt_plain_money(audit["median_risk"])}</strong></div>
-          <div class="stat"><span>Stop on the fill</span><strong>{"—" if conc["stop_coverage"] is None else f'{conc["stop_coverage"]:.0f}%'}</strong></div>
-          <div class="stat"><span>Losers held to stop</span><strong>{"—" if conc["stops_respected"] is None else f'{conc["stops_respected"]:.0f}%'}</strong></div>
-          <div class="stat"><span>Median hold, winners</span><strong>{_sessions(conc["win_hold"])}</strong></div>
-          <div class="stat"><span>Median hold, losers</span><strong>{_sessions(conc["loss_hold"])}</strong></div>
-          <div class="stat"><span>Max loss streak</span><strong>{conc["max_streak"]}</strong></div>
-          <div class="stat"><span>Commissions</span><strong>{fmt_plain_money(conc["commissions"], 0)}</strong></div>
+          <div class="stat"><span>Symbols traded</span><strong id="c-symbols">{conc["symbols"]}</strong></div>
+          <div class="stat"><span>Top symbol</span><strong id="c-top1">{esc(top1_txt)}</strong></div>
+          <div class="stat"><span>Top 3 share of gross</span><strong id="c-top3">{"—" if conc["top3_share"] is None else f'{conc["top3_share"]:.0f}%'}</strong></div>
+          <div class="stat"><span>Busiest symbol</span><strong id="c-busiest-sym">{esc(busiest_sym)}</strong></div>
+          <div class="stat"><span>Busiest entry day</span><strong id="c-busiest-day">{esc(busiest_day)}</strong></div>
+          <div class="stat"><span>Trades per week</span><strong id="c-tpw">{"—" if trow is None else f"{trow:.1f}"}</strong></div>
+          <div class="stat"><span>Median dollar risk</span><strong id="c-risk">{fmt_plain_money(audit["median_risk"])}</strong></div>
+          <div class="stat"><span>Stop on the fill</span><strong id="c-stop">{"—" if conc["stop_coverage"] is None else f'{conc["stop_coverage"]:.0f}%'}</strong></div>
+          <div class="stat"><span>Losers held to stop</span><strong id="c-losers">{"—" if conc["stops_respected"] is None else f'{conc["stops_respected"]:.0f}%'}</strong></div>
+          <div class="stat"><span>Median hold, winners</span><strong id="c-win-hold">{_sessions(conc["win_hold"])}</strong></div>
+          <div class="stat"><span>Median hold, losers</span><strong id="c-loss-hold">{_sessions(conc["loss_hold"])}</strong></div>
+          <div class="stat"><span>Max loss streak</span><strong id="c-streak">{conc["max_streak"]}</strong></div>
+          <div class="stat"><span>Commissions</span><strong id="c-comm">{fmt_plain_money(conc["commissions"], 0)}</strong></div>
         </div>
       </aside>
     </section>
@@ -1870,7 +2045,7 @@ def render_html(audit: dict) -> str:
       <p class="section-k">Distribution</p>
       <h2>R-multiple histogram</h2>
       <p class="note">R = (sell − buy) / (buy − initial stop). Buckets are (−∞, −2], (−2, −1], (−1, 0], (0, 1], (1, 2], (2, 3], (3, ∞).</p>
-      <div class="hrow">{histogram_html(audit["buckets"])}</div>
+      <div class="hrow" id="histogram">{histogram_html(audit["buckets"])}</div>
     </section>
     <section class="card">
       <p class="section-k">Open positions</p>
@@ -1880,15 +2055,16 @@ def render_html(audit: dict) -> str:
     <section class="card">
       <p class="section-k">Tape</p>
       <h2>Last 20 closed trades</h2>
-      <p class="note">Color follows the R bucket: coral for losses, green for winners.</p>
-      {trades_table(audit["recent"])}
+      <p class="note">Newest exits in the selected period. Color follows the R bucket: coral for losses, green for winners.</p>
+      <div id="recent">{trades_table(audit["recent"])}</div>
       {unmatched}
     </section>
     <p class="foot">Generated {esc(generated)} by compute_perf.py. StonkJournal real book. This page does not connect to a broker and does not place trades.</p>
   </main>
-</body>
-</html>
 """
+    page += '<script type="application/json" id="audit-data">' + payload + "</script>\n"
+    page += "<script>\n" + script + "\n</script>\n</body>\n</html>\n"
+    return page
 
 
 def public_summary(audit: dict) -> dict:

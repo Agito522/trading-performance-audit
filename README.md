@@ -12,6 +12,8 @@ python compute_perf.py
 
 The script prints `READY` and writes `docs/index.html`. A CSV that is empty, or that contains only a header, still produces the page.
 
+The page opens on **Full CSV range**. The control under the title — This week, MTD, Last 30 days, Full CSV range, and Custom from–to — recomputes the audit in the browser from closed FIFO round trips whose **exit** falls in that window. Net P&L stays realized; open marks are not added. This week and MTD run through today in America/New_York. Last 30 days is the 30 calendar days ending today.
+
 Telegram is a stub. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is unset, nothing is sent.
 
 ## Drop an IBKR CSV

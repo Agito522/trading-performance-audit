@@ -250,6 +250,10 @@ class SampleTests(unittest.TestCase):
             "Open positions",
             "Last 20 closed trades",
             "ACTIVE",
+            "This week",
+            "MTD",
+            "Last 30 days",
+            "Full CSV range",
             "Same day",
             "Overnight",
             "2–4d",
@@ -257,6 +261,157 @@ class SampleTests(unittest.TestCase):
             "10d+",
         ):
             self.assertIn(phrase, html, phrase)
+
+
+class PeriodFilterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.today = date(2026, 10, 11)
+        fills, cls.columns = cp.load_fills(ROOT / "data" / "trades.csv")
+        positions = cp.load_positions(ROOT / "data" / "open_positions.json")
+        cls.audit = cp.assemble(fills, cls.columns, positions, cp.load_safety(ROOT), today=cls.today)
+        cls.payload = json.loads(cp.audit_payload(cls.audit))
+        cls.html = cp.render_html(cls.audit)
+
+    def test_payload_is_closed_trips_only(self):
+        self.assertEqual(len(self.payload["trips"]), self.audit["round_trips"])
+        self.assertAlmostEqual(sum(row["pnl"] for row in self.payload["trips"]), self.audit["net"], places=4)
+        self.assertNotIn("unreal", self.payload["trips"][0])
+        self.assertEqual(self.payload["exitMin"], self.audit["closed"][0].exit.date().isoformat())
+        self.assertEqual(self.payload["exitMax"], self.audit["closed"][-1].exit.date().isoformat())
+        self.assertTrue(self.audit["open_rows"])
+        self.assertTrue(all(row.get("unreal") is None for row in self.audit["open_rows"]))
+        self.assertEqual(self.audit["round_trips"], 5)
+
+    def test_markup_defaults_to_full_range(self):
+        html = self.html
+        self.assertIn('data-preset="all" aria-pressed="true"', html)
+        self.assertIn('data-preset="week" aria-pressed="false"', html)
+        self.assertIn('data-preset="mtd" aria-pressed="false"', html)
+        self.assertIn('data-preset="d30" aria-pressed="false"', html)
+        self.assertIn('data-preset="custom" aria-pressed="false"', html)
+        self.assertIn('id="period-from"', html)
+        self.assertIn('id="period-to"', html)
+        self.assertIn("Unsettled open marks are not included", html)
+        self.assertIn('id="audit-data"', html)
+        self.assertIn("function auditCompute", html)
+        self.assertNotIn("</" + "script>", (ROOT / "period_filter.js").read_text(encoding="utf-8").lower())
+        data = html.split('id="audit-data">', 1)[1].split("</script>", 1)[0]
+        self.assertEqual(len(json.loads(data)["trips"]), self.audit["round_trips"])
+
+    def test_presets_and_windows_match_python(self):
+        script = (ROOT / "period_filter.js").read_text(encoding="utf-8")
+        for name in ("all", "week", "mtd", "d30"):
+            start, end = cp.preset_bounds(name, self.today)
+            got = self._bounds(script, name, self.today.isoformat())
+            self.assertEqual(got["start"], None if start is None else start.isoformat())
+            self.assertEqual(got["end"], None if end is None else end.isoformat())
+            self._assert_window(script, start, end)
+        self._assert_window(script, date(2026, 3, 1), date(2026, 3, 31))
+        self._assert_window(script, date(2020, 1, 1), date(2020, 1, 2))
+        week_start, week_end = cp.preset_bounds("week", self.today)
+        week = cp.filter_exits(self.audit["closed"], week_start, week_end)
+        self.assertTrue(week)
+        self.assertTrue(all(week_start <= rt.exit.date() <= week_end for rt in week))
+        self.assertLess(len(week), len(self.audit["closed"]))
+        self.assertNotAlmostEqual(
+            cp.metrics_from_closed(week, self.columns)["net"],
+            self.audit["net"],
+            places=0,
+        )
+
+    def test_money_format_matches_python(self):
+        script = (ROOT / "period_filter.js").read_text(encoding="utf-8")
+        values = [row["pnl"] for row in self.payload["trips"]]
+        values.extend([self.audit["net"], self.audit["expectancy"], -self.audit["drawdown"]["dollars"]])
+        runner = script + "\nconst nums = " + json.dumps(values) + ";\nprocess.stdout.write(JSON.stringify(nums.map((n) => auditFormat.money(n))));\n"
+        got = json.loads(self._node(runner))
+        for value, formatted in zip(values, got):
+            self.assertEqual(formatted, cp.fmt_money(value), value)
+
+    def _bounds(self, script, name, today):
+        runner = (
+            script
+            + f"\nprocess.stdout.write(JSON.stringify(auditPresetBounds({json.dumps(name)}, {json.dumps(today)})));\n"
+        )
+        return json.loads(self._node(runner))
+
+    def _assert_window(self, script, start, end):
+        rows = cp.filter_exits(self.audit["closed"], start, end)
+        metrics = cp.metrics_from_closed(rows, self.columns)
+        view = json.loads(
+            self._node(
+                script
+                + "\nprocess.stdout.write(JSON.stringify(auditCompute("
+                + json.dumps(self.payload)
+                + ", "
+                + json.dumps(None if start is None else start.isoformat())
+                + ", "
+                + json.dumps(None if end is None else end.isoformat())
+                + ")));\n"
+            )
+        )
+        self.assertEqual(view["round_trips"], metrics["round_trips"])
+        self.assertAlmostEqual(view["net"], metrics["net"], places=4)
+        self._near(view["win_rate"], metrics["win_rate"])
+        if metrics["profit_factor"] is None:
+            self.assertIsNone(view["profit_factor"])
+            self.assertFalse(view["profit_factor_infinite"])
+        elif math_isinf(metrics["profit_factor"]):
+            self.assertTrue(view["profit_factor_infinite"])
+        else:
+            self.assertAlmostEqual(view["profit_factor"], metrics["profit_factor"], places=6)
+        self._near(view["expectancy"], metrics["expectancy"])
+        self._near(view["expectancy_r"], metrics["expectancy_r"])
+        self.assertAlmostEqual(view["drawdown"]["dollars"], metrics["drawdown"]["dollars"], places=4)
+        self._near(view["drawdown"]["pct"], metrics["drawdown"]["pct"])
+        trough = metrics["drawdown"]["trough"]
+        self.assertEqual(view["drawdown"]["trough"], None if trough is None else trough.date().isoformat())
+        self.assertEqual(view["focus"]["trades"], metrics["focus"]["trades"])
+        self.assertEqual(view["avoid"]["trades"], metrics["avoid"]["trades"])
+        self.assertAlmostEqual(view["focus"]["pnl"], metrics["focus"]["pnl"], places=4)
+        self.assertAlmostEqual(view["avoid"]["pnl"], metrics["avoid"]["pnl"], places=4)
+        self.assertEqual(view["buckets"], metrics["buckets"])
+        ranked = sorted(
+            metrics["leaks"],
+            key=lambda row: (row["pnl"] is None, 0 if row["pnl"] is None else row["pnl"]),
+        )
+        self.assertEqual([row["name"] for row in view["leaks"]], [row["name"] for row in ranked])
+        for got, exp in zip(view["leaks"], ranked):
+            self.assertEqual(got["trades"], exp["trades"])
+            self._near(got["pnl"], exp["pnl"])
+        self.assertEqual([row["key"] for row in view["best"]], [row["key"] for row in metrics["best"]])
+        self.assertEqual([row["key"] for row in view["worst"]], [row["key"] for row in metrics["worst"]])
+        self.assertEqual([row["key"] for row in view["holds"]], [row["key"] for row in metrics["holds"]])
+        for got, exp in zip(view["holds"], metrics["holds"]):
+            self.assertAlmostEqual(got["pnl"], exp["pnl"], places=4)
+            self.assertEqual(got["trades"], exp["trades"])
+        self.assertEqual([row["symbol"] for row in view["recent"]], [rt.symbol for rt in metrics["recent"]])
+        self.assertEqual(view["concentration"]["symbols"], metrics["concentration"]["symbols"])
+        self.assertEqual(view["concentration"]["max_streak"], metrics["concentration"]["max_streak"])
+        self._near(view["concentration"]["top3_share"], metrics["concentration"]["top3_share"])
+        self._near(view["median_risk"], metrics["median_risk"])
+        py_week = [point["week"].isoformat() for point in metrics["weekly"]]
+        js_week = [point["week"] for point in view["weekly"]]
+        self.assertEqual(js_week, py_week)
+
+    def _near(self, got, exp):
+        if exp is None:
+            self.assertIsNone(got)
+        else:
+            self.assertAlmostEqual(got, exp, places=4)
+
+    def _node(self, source: str) -> str:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+            handle.write(source)
+            path = handle.name
+        proc = subprocess.run(["node", path], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout
+
+
+def math_isinf(value) -> bool:
+    return value is not None and value == float("inf")
 
 
 if __name__ == "__main__":
