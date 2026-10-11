@@ -1,6 +1,6 @@
 # 2026 Trading Performance Audit
 
-A one-page, cream-paper audit of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is **SAMPLE** data (about +$200k over 127 round trips). It is not a live account, not a recommendation, and this repo never places orders or logs into IBKR.
+A one-page night-city HUD of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is **SAMPLE** data (about +$200k over 127 round trips). It is not a live account, not a recommendation, and this repo never places orders or logs into IBKR.
 
 Page: [https://agito522.github.io/trading-performance-audit/](https://agito522.github.io/trading-performance-audit/)
 
