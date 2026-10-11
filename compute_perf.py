@@ -458,6 +458,16 @@ def open_risk(entry: float, qty: float, stop: float | None) -> float | None:
     return (float(entry) - float(stop)) * float(qty)
 
 
+def open_r(entry: float, last: float | None, stop: float | None) -> float | None:
+    """Open-book R: (Last − entry) / (entry − stop). Blank unless the stop is below the entry."""
+    if last is None or stop is None or not (float(stop) < float(entry)):
+        return None
+    risk = float(entry) - float(stop)
+    if abs(risk) <= 1e-12:
+        return None
+    return (float(last) - float(entry)) / risk
+
+
 def _bar_date(ts) -> date | None:
     if ts is None:
         return None
@@ -1164,7 +1174,8 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
         last = pos.get("last")
         unreal = open_unrealized(pos["avg_price"], pos["qty"], last)
         risk = open_risk(pos["avg_price"], pos["qty"], pos.get("stop"))
-        open_rows.append({**pos, "unreal": unreal, "risk": risk, "source": "open_positions"})
+        r_multiple = open_r(pos["avg_price"], last, pos.get("stop"))
+        open_rows.append({**pos, "unreal": unreal, "risk": risk, "r": r_multiple, "source": "open_positions"})
     if not open_rows:
         for lot in open_lots:
             open_rows.append(
@@ -1177,6 +1188,7 @@ def assemble(fills: list[Fill], columns: set[str], positions: list[dict], safety
                     "last": None,
                     "unreal": None,
                     "risk": open_risk(lot.buy, lot.qty, lot.stop),
+                    "r": open_r(lot.buy, None, lot.stop),
                     "source": "fills",
                 }
             )
@@ -1339,11 +1351,12 @@ def _cls_money(value) -> str:
     return "flat"
 
 
-def diverging_html(rows: list[dict], label_key="key") -> str:
+def diverging_html(rows: list[dict], label_key="key", share: bool = False) -> str:
     amounts = [abs(_as_float(row["pnl"]) or 0.0) for row in rows]
     peak = max(amounts) if amounts else 1.0
     peak = peak or 1.0
     parts = []
+    bar_class = "divbar stock" if share else "divbar"
     for row in rows:
         pnl = _as_float(row["pnl"]) or 0.0
         width = min(100.0, abs(pnl) / peak * 100.0)
@@ -1360,10 +1373,14 @@ def diverging_html(rows: list[dict], label_key="key") -> str:
         if trades is not None:
             win_txt = f" · {win:.0f}% win" if win is not None and trades else ""
             sub = f'<small>{trades} trade{"s" if trades != 1 else ""}{win_txt}</small>'
+        amount = fmt_money(pnl)
+        if share:
+            amount = f"{amount} / {fmt_pct(100.0 * pnl / peak, 1, signed=True)}"
+        name_class = ' class="sym"' if share else ""
         parts.append(
-            f'<div class="divbar"><div class="lbl"><span>{esc(row.get("label", row.get(label_key)))}</span>{sub}</div>'
+            f'<div class="{bar_class}"><div class="lbl"><span{name_class}>{esc(row.get("label", row.get(label_key)))}</span>{sub}</div>'
             f'<div class="track"><div class="side left">{left}</div><div class="side right">{right}</div></div>'
-            f'<div class="amt {_cls_money(pnl)}">{fmt_money(pnl)}</div></div>'
+            f'<div class="amt {_cls_money(pnl)}">{amount}</div></div>'
         )
     return "\n".join(parts)
 
@@ -1558,12 +1575,13 @@ def open_table(rows: list[dict]) -> str:
             f"<td class=\"num\">{'—' if last is None else f'{last:,.2f}'}</td>"
             f"<td class=\"num {_cls_money(row.get('unreal'))}\">{fmt_money(row.get('unreal'))}</td>"
             f"<td class=\"num\">{fmt_plain_money(row.get('risk'))}</td>"
+            f"<td class=\"num {_cls_money(row.get('r'))}\">{fmt_r(row.get('r'))}</td>"
             f"<td>{esc(opened_s)}</td>"
             "</tr>"
         )
     return (
         '<div class="table-wrap"><table class="trades"><thead><tr>'
-        "<th>Symbol</th><th>Qty</th><th>Avg</th><th>Stop</th><th>Last</th><th>Unrealized</th><th>Risk $</th><th>Opened</th>"
+        "<th>Symbol</th><th>Qty</th><th>Avg</th><th>Stop</th><th>Last</th><th>Unrealized</th><th>Risk $</th><th>No. of R</th><th>Opened</th>"
         "</tr></thead><tbody>"
         + "\n".join(body)
         + "</tbody></table></div>"
@@ -1781,8 +1799,11 @@ svg { width: 100%; height: auto; display: block; }
   margin: 0.42rem 0;
 }
 .lbl { display: flex; flex-direction: column; line-height: 1.15; }
-.lbl span { font-weight: 600; font-size: 0.92rem; }
+.lbl span { font-weight: 700; font-size: 0.92rem; color: #f4f7fb; }
+.lbl span.sym { color: var(--yellow); font-family: var(--mono); letter-spacing: 0.06em; }
 .lbl small { color: var(--muted); font-size: 0.75rem; font-family: var(--mono); }
+.divbar.stock { grid-template-columns: minmax(5.5rem, 7.5rem) minmax(0, 1fr) auto; }
+.divbar.stock .amt { white-space: nowrap; font-size: 0.88rem; }
 .track { display: grid; grid-template-columns: 1fr 1fr; height: 14px; position: relative; }
 .track::before {
   content: "";
@@ -1951,6 +1972,7 @@ def open_last_caption(audit: dict) -> str:
     text += (
         "Unrealized is (Last − entry) × shares. "
         "Risk $ is (entry − stop) × shares when the stop is below the entry. "
+        "No. of R is (Last − entry) / (entry − stop) when the stop is below the entry, otherwise blank. "
         "The browser does not fetch quotes. Open marks are not included in Net P&L."
     )
     missing = list(quote.get("missing") or [])
@@ -2183,11 +2205,11 @@ def render_html(audit: dict) -> str:
         <article class="card">
           <p class="section-k">P&amp;L by stock</p>
           <h2>Best 5</h2>
-          <div id="best">{diverging_html(audit["best"]) if audit["best"] else '<p class="empty">No winning symbols.</p>'}</div>
+          <div id="best">{diverging_html(audit["best"], share=True) if audit["best"] else '<p class="empty">No winning symbols.</p>'}</div>
         </article>
         <article class="card">
           <h2>Worst 5</h2>
-          <div id="worst">{diverging_html(audit["worst"]) if audit["worst"] else '<p class="empty">No losing symbols.</p>'}</div>
+          <div id="worst">{diverging_html(audit["worst"], share=True) if audit["worst"] else '<p class="empty">No losing symbols.</p>'}</div>
         </article>
       </div>
       <aside class="card">

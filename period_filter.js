@@ -499,7 +499,7 @@ function auditCompute(payload, start, end) {
   };
 }
 
-function divergingHtml(rows) {
+function divergingHtml(rows, share) {
   const amounts = rows.map((row) => Math.abs(row.pnl || 0));
   let peak = amounts.length ? Math.max.apply(null, amounts) : 1;
   if (!peak) peak = 1;
@@ -520,9 +520,13 @@ function divergingHtml(rows) {
       sub = "<small>" + row.trades + " " + noun + winTxt + "</small>";
     }
     const label = row.label != null ? row.label : row.key;
-    return '<div class="divbar"><div class="lbl"><span>' + esc(label) + "</span>" + sub + '</div>'
+    let amount = fmtMoney(pnl);
+    if (share) amount = amount + " / " + fmtPct((100 * pnl) / peak, 1, true);
+    const name = share ? ' class="sym"' : "";
+    const rowClass = share ? "divbar stock" : "divbar";
+    return '<div class="' + rowClass + '"><div class="lbl"><span' + name + '>' + esc(label) + "</span>" + sub + '</div>'
       + '<div class="track"><div class="side left">' + left + '</div><div class="side right">' + right + "</div></div>"
-      + '<div class="amt ' + moneyClass(pnl) + '">' + fmtMoney(pnl) + "</div></div>";
+      + '<div class="amt ' + moneyClass(pnl) + '">' + amount + "</div></div>";
   }).join("\n");
 }
 
@@ -730,8 +734,8 @@ function paint(view) {
   document.getElementById("times").innerHTML = view.times.length ? divergingHtml(view.times) : '<p class="empty">No closed round trips.</p>';
   document.getElementById("dows").innerHTML = view.dows.length ? divergingHtml(view.dows) : '<p class="empty">No closed round trips.</p>';
   document.getElementById("edge-body").innerHTML = edgeHtml(view.edge);
-  document.getElementById("best").innerHTML = view.best.length ? divergingHtml(view.best) : '<p class="empty">No winning symbols.</p>';
-  document.getElementById("worst").innerHTML = view.worst.length ? divergingHtml(view.worst) : '<p class="empty">No losing symbols.</p>';
+  document.getElementById("best").innerHTML = view.best.length ? divergingHtml(view.best, true) : '<p class="empty">No winning symbols.</p>';
+  document.getElementById("worst").innerHTML = view.worst.length ? divergingHtml(view.worst, true) : '<p class="empty">No losing symbols.</p>';
 
   const conc = view.concentration;
   document.getElementById("c-symbols").textContent = String(conc.symbols);
@@ -837,6 +841,7 @@ function boot() {
   if (payload.exitMax) to.value = payload.exitMax;
 }
 
+globalThis.divergingHtml = divergingHtml;
 globalThis.auditCompute = auditCompute;
 globalThis.auditPresetBounds = auditPresetBounds;
 globalThis.auditFormat = {

@@ -413,7 +413,7 @@ class PeriodFilterTests(unittest.TestCase):
 
 
 class OpenMarkTests(unittest.TestCase):
-    def test_unrealized_and_risk_formulas(self):
+    def test_unrealized_risk_and_r_formulas(self):
         self.assertIsNone(cp.open_unrealized(50, 5, None))
         self.assertAlmostEqual(cp.open_unrealized(50, 5, 60), 50)
         self.assertAlmostEqual(cp.open_unrealized(50, 5, 40), -50)
@@ -421,6 +421,11 @@ class OpenMarkTests(unittest.TestCase):
         self.assertIsNone(cp.open_risk(534.3, 10, 534.33))
         self.assertAlmostEqual(cp.open_risk(50, 5, 40), 50)
         self.assertAlmostEqual(cp.open_risk(145.4, 50, 142), 170)
+        self.assertIsNone(cp.open_r(50, None, 40))
+        self.assertIsNone(cp.open_r(50, 60, None))
+        self.assertIsNone(cp.open_r(534.3, 586.06, 534.33))
+        self.assertAlmostEqual(cp.open_r(50, 60, 40), 1.0)
+        self.assertAlmostEqual(cp.open_r(145.4, 139.67, 142), (139.67 - 145.4) / (145.4 - 142))
 
     def test_parser_uses_close_not_adjusted(self):
         try:
@@ -487,12 +492,16 @@ class OpenMarkTests(unittest.TestCase):
             self.assertIn(">$50<", html)
             self.assertIn("Yahoo Finance daily close through Oct 9, 2026", html)
             self.assertIn("Open marks are not included in Net P&amp;L", html)
+            self.assertIn("No. of R", html)
+            self.assertIn("+1.00R", html)
             self.assertIn("Not included in net P&amp;L", html)
             payload = json.loads(html.split('id="audit-data">', 1)[1].split("</script>", 1)[0])
             self.assertEqual(len(payload["trips"]), 1)
             self.assertAlmostEqual(payload["trips"][0]["pnl"], 30)
             self.assertNotIn("unreal", payload["trips"][0])
+            self.assertNotIn("last", payload["trips"][0])
             self.assertNotIn("open_unreal", payload)
+            self.assertNotIn("open_r", payload)
 
     def test_missing_print_keeps_existing_last(self):
         positions = [{"symbol": "BBB", "qty": 5, "avg_price": 50, "stop": 40, "last": 11}]
@@ -528,6 +537,81 @@ class OpenMarkTests(unittest.TestCase):
             self.assertAlmostEqual(summary["net_pnl"], 0)
             html = (root / "docs" / "index.html").read_text(encoding="utf-8")
             self.assertIn("so unrealized P&amp;L is blank", html)
+
+
+class StockBarTests(unittest.TestCase):
+    def test_best_labels_are_dollars_and_bar_share(self):
+        fills, columns = cp.load_fills(ROOT / "data" / "trades.csv")
+        positions = cp.load_positions(ROOT / "data" / "open_positions.json")
+        audit = cp.assemble(fills, columns, positions, None, today=date(2026, 10, 11))
+        html = cp.diverging_html(audit["best"], share=True)
+        self.assertIn('class="sym">LITE', html)
+        self.assertIn("+$2,007 / +100.0%", html)
+        self.assertIn('class="sym">NTAP', html)
+        self.assertIn("+$1,229 / +61.2%", html)
+        self.assertIn("divbar stock", html)
+        holds = cp.diverging_html(audit["holds"], "label")
+        self.assertNotIn(" / ", holds)
+        self.assertNotIn('class="sym"', holds)
+        self.assertIn('<p class="empty">No losing symbols.</p>', cp.render_html(audit))
+        losers = cp.diverging_html(
+            [
+                {"key": "ZZZ", "pnl": -80, "trades": 1, "win_rate": 0},
+                {"key": "YYY", "pnl": -20, "trades": 2, "win_rate": 0},
+            ],
+            share=True,
+        )
+        self.assertIn('class="sym">ZZZ', losers)
+        self.assertIn("−$80 / −100.0%", losers)
+        self.assertIn("−$20 / −25.0%", losers)
+
+    def test_js_stock_labels_match_python(self):
+        rows = [
+            {"key": "LITE", "pnl": 2007.25, "trades": 1, "win_rate": 100},
+            {"key": "NBIS", "pnl": 49, "trades": 1, "win_rate": 100},
+        ]
+        script = (ROOT / "period_filter.js").read_text(encoding="utf-8")
+        proc = subprocess.run(
+            ["node", "-e", script + "\nprocess.stdout.write(divergingHtml(" + json.dumps(rows) + ", true));"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, cp.diverging_html(rows, share=True))
+
+    def test_open_table_r_column(self):
+        html = cp.open_table(
+            [
+                {
+                    "symbol": "BBB",
+                    "qty": 5,
+                    "avg_price": 50,
+                    "stop": 40,
+                    "last": 60,
+                    "unreal": 50,
+                    "risk": 50,
+                    "r": 1.0,
+                    "opened_at": None,
+                },
+                {
+                    "symbol": "DELL",
+                    "qty": 10,
+                    "avg_price": 534.3,
+                    "stop": 534.33,
+                    "last": 586.06,
+                    "unreal": 517.6,
+                    "risk": None,
+                    "r": None,
+                    "opened_at": None,
+                },
+            ]
+        )
+        self.assertIn("No. of R", html)
+        self.assertIn('class="num pos">+1.00R', html)
+        self.assertIn(">DELL<", html)
+        dell = html.split(">DELL<", 1)[1]
+        self.assertIn('class="num flat">—', dell)
 
 
 def math_isinf(value) -> bool:
