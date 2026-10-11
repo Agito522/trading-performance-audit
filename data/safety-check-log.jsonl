@@ -1,0 +1,2 @@
+{"timestamp": "2026-10-10T21:05:11Z", "status": "ACTIVE", "cycle": "post-close", "ok": true, "detail": "positions marked, stops live"}
+{"timestamp": "2026-10-11T12:10:04Z", "status": "ACTIVE", "cycle": "weekend-safety", "ok": true, "detail": "limits clear, kill switch off, no new orders"}

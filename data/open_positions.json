@@ -1,0 +1,45 @@
+{
+  "as_of": "2026-10-11T12:10:04Z",
+  "positions": [
+    {
+      "symbol": "CRWD",
+      "quantity": 80,
+      "avg_price": 339.06,
+      "stop_price": 333.97,
+      "opened_at": "2026-10-08 10:06:12",
+      "last_price": 343.13
+    },
+    {
+      "symbol": "AMD",
+      "quantity": 60,
+      "avg_price": 164.67,
+      "stop_price": 162.2,
+      "opened_at": "2026-10-08 10:22:12",
+      "last_price": 162.36
+    },
+    {
+      "symbol": "PLTR",
+      "quantity": 60,
+      "avg_price": 73.98,
+      "stop_price": 72.87,
+      "opened_at": "2026-10-09 09:48:12",
+      "last_price": 74.57
+    },
+    {
+      "symbol": "PANW",
+      "quantity": 140,
+      "avg_price": 188.83,
+      "stop_price": 186.0,
+      "opened_at": "2026-10-09 10:18:12",
+      "last_price": 187.13
+    },
+    {
+      "symbol": "DDOG",
+      "quantity": 80,
+      "avg_price": 143.59,
+      "stop_price": 141.44,
+      "opened_at": "2026-10-09 11:05:12",
+      "last_price": 144.16
+    }
+  ]
+}
