@@ -1,0 +1,98 @@
+[
+  {
+    "symbol": "SSO-OPT",
+    "qty": 1.0,
+    "avg_price": 195.0,
+    "opened_at": "2026-10-09T16:30:13.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "DRAM-OPT",
+    "qty": 1.0,
+    "avg_price": 111.00000000000001,
+    "opened_at": "2026-10-09T15:04:18.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "DRAM-OPT",
+    "qty": 1.0,
+    "avg_price": 202.99999999999997,
+    "opened_at": "2026-10-08T15:23:48.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "META-OPT",
+    "qty": 1.0,
+    "avg_price": 4425.0,
+    "opened_at": "2026-10-07T15:22:55.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "NVDA-OPT",
+    "qty": 1.0,
+    "avg_price": 108.0,
+    "opened_at": "2026-10-06T14:48:38.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "NVDL-OPT",
+    "qty": 1.0,
+    "avg_price": 97.0,
+    "opened_at": "2026-10-02T16:33:21.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "DRAM-OPT",
+    "qty": 1.0,
+    "avg_price": 1000.0,
+    "opened_at": "2026-10-02T14:10:52.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "UDOW-OPT",
+    "qty": 1.0,
+    "avg_price": 149.0,
+    "opened_at": "2026-09-25T09:07:53.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "P-OPT",
+    "qty": 1.0,
+    "avg_price": 1340.0,
+    "opened_at": "2026-09-25T09:05:23.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "MAGS-OPT",
+    "qty": 1.0,
+    "avg_price": 135.0,
+    "opened_at": "2026-09-25T08:51:33.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "TQQQ-OPT",
+    "qty": 1.0,
+    "avg_price": 137.0,
+    "opened_at": "2026-09-23T09:06:52.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "MRVL-OPT",
+    "qty": 1.0,
+    "avg_price": 731.0,
+    "opened_at": "2026-09-23T09:01:08.000Z",
+    "side": "short",
+    "asset": "option"
+  }
+]

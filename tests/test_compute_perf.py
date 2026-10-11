@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FIFO, R buckets, empty files, and the SAMPLE book."""
+"""FIFO, R buckets, empty files, and the StonkJournal book."""
 
 from __future__ import annotations
 
@@ -141,7 +141,8 @@ class FileTests(unittest.TestCase):
             summary = cp.build_page(root, today=date(2026, 10, 11))
             self.assertEqual(summary["round_trips"], 0)
             html = (root / "docs" / "index.html").read_text(encoding="utf-8")
-            self.assertIn("SAMPLE", html)
+            self.assertIn("STONKJOURNAL", html)
+            self.assertNotIn("SAMPLE", html)
             self.assertIn("N/A", html)
             self.assertIn("2026 Trading Performance Audit", html)
 
@@ -215,20 +216,18 @@ class CastTests(unittest.TestCase):
 
 
 class SampleTests(unittest.TestCase):
-    def test_sample_book_shape(self):
+    def test_stonkjournal_book_shape(self):
         summary = cp.build_page(ROOT, today=date(2026, 10, 11))
-        self.assertEqual(summary["round_trips"], 127)
-        self.assertGreater(summary["net_pnl"], 190_000)
-        self.assertLess(summary["net_pnl"], 210_000)
-        self.assertEqual(sum(summary["buckets"].values()), 127)
-        self.assertGreater(summary["focus_pnl"], 0)
-        self.assertLess(summary["avoid_pnl"], 0)
-        self.assertEqual(summary["open_positions"], 5)
+        self.assertEqual(summary["round_trips"], 5)
+        self.assertAlmostEqual(summary["net_pnl"], 3865.05, places=2)
+        self.assertEqual(summary["open_positions"], 24)
         self.assertEqual(summary["today_pnl"], 0)
+        self.assertAlmostEqual(summary["win_rate"], 100.0)
         self.assertIs(type(summary["net_pnl"]), float)
         html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("SAMPLE", html)
         for phrase in (
-            "SAMPLE",
+            "STONKJOURNAL",
             "2026 Trading Performance Audit",
             "Net P&amp;L",
             "Round Trips",

@@ -368,7 +368,8 @@ def _row_to_fill(rec: dict, symbol: str) -> Fill | None:
         proceeds = parse_number(rec.get("proceeds"))
         if proceeds is not None and qty:
             price = abs(proceeds) / qty
-    if price is None or price <= 0:
+    # Zero is a real print: an expired option is closed at 0 in the StonkJournal encoding.
+    if price is None or price < 0:
         return None
     dt_value = rec.get("datetime") or ""
     when, has_time = parse_datetime(dt_value)
@@ -1736,12 +1737,12 @@ def render_html(audit: dict) -> str:
 </head>
 <body>
   <div class="goldbar"></div>
-  <div class="banner">SAMPLE · DEMONSTRATION FILLS · NOT A LIVE BROKERAGE ACCOUNT</div>
+  <div class="banner">STONKJOURNAL · REAL BOOK</div>
   <main class="wrap">
     <header class="mast">
       <p class="eyebrow">Night City // HUD</p>
       <h1>2026 Trading Performance Audit</h1>
-      <p class="sub">{esc(span)} · US equities · FIFO round trips · SAMPLE</p>
+      <p class="sub">{esc(span)} · US equities · FIFO round trips · StonkJournal</p>
     </header>
     {bot_html(audit["safety"])}
     <section class="kpi-strip" aria-label="Key results">
@@ -1883,7 +1884,7 @@ def render_html(audit: dict) -> str:
       {trades_table(audit["recent"])}
       {unmatched}
     </section>
-    <p class="foot">Generated {esc(generated)} by compute_perf.py. SAMPLE data. This page does not connect to a broker and does not place trades.</p>
+    <p class="foot">Generated {esc(generated)} by compute_perf.py. StonkJournal real book. This page does not connect to a broker and does not place trades.</p>
   </main>
 </body>
 </html>
@@ -1922,7 +1923,7 @@ def build_page(root: Path | None = None, today: date | None = None) -> dict:
     (docs / ".nojekyll").write_text("", encoding="utf-8")
     summary = public_summary(audit)
     telegram_notify(
-        f"Audit ready. Net {summary['net_pnl']:.0f}. Round trips {summary['round_trips']}. SAMPLE."
+        f"Audit ready. Net {summary['net_pnl']:.0f}. Round trips {summary['round_trips']}. StonkJournal."
     )
     return summary
 
