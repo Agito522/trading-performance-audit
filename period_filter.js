@@ -678,6 +678,119 @@ function equitySvg(points) {
     + "</svg>";
 }
 
+function navInWindow(points, start, end) {
+  return (points || []).filter((row) => {
+    if (start && row.date < start) return false;
+    if (end && row.date > end) return false;
+    return true;
+  });
+}
+
+function navSummary(points, goal) {
+  const target = Number(goal || 1000000);
+  if (!points.length) {
+    return { latest: null, pct: null, gap: null, placeholder: false, hkd: false, goal: target };
+  }
+  const latest = Number(points[points.length - 1].nav);
+  return {
+    latest: latest,
+    pct: target ? (100 * latest) / target : null,
+    gap: target - latest,
+    placeholder: points.some((row) => row.source === "placeholder"),
+    hkd: points.some((row) => String(row.currency || "").toUpperCase() === "HKD"),
+    goal: target,
+  };
+}
+
+function poolSvg(points, goal) {
+  const target = Number(goal || 1000000);
+  if (!points.length) {
+    return '<p class="empty">No NAV points in this period. The $1,000,000 goal is unchanged.</p>';
+  }
+  const navs = points.map((point) => Number(point.nav));
+  const peak = Math.max(target, Math.max.apply(null, navs));
+  const ymax = peak * 1.06;
+  const ymin = 0;
+  const width = 960;
+  const height = 300;
+  const padL = 112;
+  const padR = 24;
+  const padT = 28;
+  const padB = 36;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  function yAt(value) {
+    return padT + innerH * (1 - (value - ymin) / (ymax - ymin));
+  }
+  function xAt(index) {
+    if (points.length === 1) return padL + innerW / 2;
+    return padL + (innerW * index) / (points.length - 1);
+  }
+  const coords = navs.map((nav, index) => [xAt(index), yAt(nav)]);
+  const baseline = yAt(0);
+  const surface = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
+  const water = coords[0][0].toFixed(1) + "," + baseline.toFixed(1) + " " + surface + " " + coords[coords.length - 1][0].toFixed(1) + "," + baseline.toFixed(1);
+  const goalY = yAt(target);
+  const ticks = [0, 250000, 500000, 750000, 1000000].filter((mark) => mark >= ymin - 1 && mark <= ymax + 1).map((mark) => {
+    const y = yAt(mark);
+    return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + y.toFixed(1) + '" class="grid"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="tick">' + esc(fmtPlainMoney(mark)) + "</text>";
+  }).join("");
+  const labelStep = Math.max(1, Math.floor(points.length / 6));
+  const labels = [];
+  for (let i = 0; i < points.length; i += 1) {
+    if (i % labelStep !== 0 && i !== points.length - 1) continue;
+    labels.push('<text x="' + xAt(i).toFixed(1) + '" y="' + (height - 10) + '" text-anchor="middle" class="tick">' + esc(fmtDate(points[i].date, false)) + "</text>");
+  }
+  const endX = coords[coords.length - 1][0];
+  const endY = coords[coords.length - 1][1];
+  const latest = navs[navs.length - 1];
+  const pct = target ? (100 * latest) / target : 0;
+  const endLabel = fmtPlainMoney(latest) + " · " + fmtPct(pct, 1, false);
+  const tankH = yAt(0) - goalY;
+  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="USD NAV path ending at ' + esc(endLabel) + ' of the $1,000,000 goal">'
+    + '<defs><linearGradient id="poolFill" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="#00f0ff" stop-opacity="0.62"/>'
+    + '<stop offset="100%" stop-color="#00f0ff" stop-opacity="0.14"/>'
+    + "</linearGradient></defs>"
+    + ticks
+    + '<rect x="' + padL + '" y="' + goalY.toFixed(1) + '" width="' + innerW.toFixed(1) + '" height="' + tankH.toFixed(1) + '" class="pool-tank"/>'
+    + '<polygon points="' + water + '" fill="url(#poolFill)"/>'
+    + '<line x1="' + padL + '" y1="' + goalY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + goalY.toFixed(1) + '" class="pool-goal"/>'
+    + '<text x="' + (width - padR - 8) + '" y="' + Math.max(16, goalY - 8).toFixed(1) + '" text-anchor="end" class="pool-goal-label">$1,000,000 goal</text>'
+    + '<polyline points="' + surface + '" class="pool-line"/>'
+    + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
+    + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>"
+    + labels.join("")
+    + "</svg>";
+}
+
+function paintPool(payload, bounds) {
+  const chart = document.getElementById("pool-chart");
+  if (!chart || !payload) return;
+  const goal = Number(payload.navGoal || 1000000);
+  const points = navInWindow(payload.nav || [], bounds && bounds.start, bounds && bounds.end);
+  const summary = navSummary(points, goal);
+  const flag = document.getElementById("pool-flag");
+  const nav = document.getElementById("pool-nav");
+  const pct = document.getElementById("pool-pct");
+  const gap = document.getElementById("pool-gap");
+  const note = document.getElementById("pool-note");
+  if (flag) {
+    flag.textContent = summary.placeholder
+      ? "Placeholder series — not account NAV. Replace data/nav_history.csv."
+      : "";
+  }
+  if (nav) nav.textContent = summary.latest == null ? "—" : fmtPlainMoney(summary.latest);
+  if (pct) pct.textContent = summary.pct == null ? "—" : fmtPct(summary.pct, 1, false);
+  if (gap) gap.textContent = summary.gap == null ? "—" : fmtPlainMoney(summary.gap);
+  if (note) {
+    const currency = summary.hkd ? "USD converted from HKD at fx_to_usd." : "USD.";
+    note.textContent = currency + " Last point in the selected period. Gap is $1,000,000 − NAV. Not included in Net P&L.";
+  }
+  chart.innerHTML = poolSvg(points, goal);
+}
+
 function winPhrase(rate) {
   if (rate == null) return "—";
   return formatFixed(rate, 0) + "% win";
@@ -829,6 +942,7 @@ function boot() {
     if (name !== "custom") reflect(bounds);
     const view = auditCompute(payload, bounds.start, bounds.end);
     paint(view);
+    paintPool(payload, bounds);
     status.textContent = windowLine(bounds, view.round_trips, payload);
   }
 
@@ -842,6 +956,9 @@ function boot() {
 }
 
 globalThis.divergingHtml = divergingHtml;
+globalThis.navInWindow = navInWindow;
+globalThis.navSummary = navSummary;
+globalThis.poolSvg = poolSvg;
 globalThis.auditCompute = auditCompute;
 globalThis.auditPresetBounds = auditPresetBounds;
 globalThis.auditFormat = {

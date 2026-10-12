@@ -16,6 +16,8 @@ On that run the script asks Yahoo Finance for the latest daily **close** of each
 
 Best 5 and Worst 5 print each ticker in the same bright yellow as the open book. Next to the bar, the label is realized dollars and that bar’s length as a percent of the longest bar in the same list, for example `+$2,007 / +100.0%`. Holding-period and entry charts stay dollar-only.
 
+The swimming pool chart is the path toward a **$1,000,000 USD** NAV goal. It reads `data/nav_history.csv` (`date`, `amount`, `currency`, `fx_to_usd`, `source`). USD amounts are labeled USD. HKD amounts convert at that row’s `fx_to_usd`, and the chart says so. The committed file is a placeholder series until a real NAV history replaces it. The period control keeps the NAV dates inside the window. Net P&L stays realized closes and does not include the pool.
+
 The page opens on **Full CSV range**. The control under the title — This week, MTD, Last 30 days, Full CSV range, and Custom from–to — recomputes the audit in the browser from closed FIFO round trips whose **exit** falls in that window. Net P&L stays realized; open marks are not added. This week and MTD run through today in America/New_York. Last 30 days is the 30 calendar days ending today.
 
 Telegram is a stub. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is unset, nothing is sent.

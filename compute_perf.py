@@ -883,6 +883,84 @@ def max_drawdown(rows: list[RoundTrip]) -> dict:
     return {"dollars": worst, "pct": pct, "trough": trough}
 
 
+NAV_GOAL = 1_000_000.0
+
+
+def load_nav(path: Path) -> list[dict]:
+    """USD NAV points from data/nav_history.csv. HKD rows convert at fx_to_usd."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8-sig").strip()
+    if not text:
+        return []
+    by_date: dict[date, dict] = {}
+    for row in csv.DictReader(text.splitlines()):
+        if not row:
+            continue
+        raw_day = str(row.get("date") or row.get("Date") or "").strip()
+        if len(raw_day) < 10:
+            continue
+        try:
+            day = date.fromisoformat(raw_day[:10])
+        except ValueError:
+            continue
+        amount = parse_number(row.get("amount", row.get("nav", row.get("nav_usd"))))
+        if amount is None or amount < 0:
+            continue
+        currency = str(row.get("currency") or "USD").strip().upper() or "USD"
+        fx = parse_number(row.get("fx_to_usd", row.get("fx")))
+        if currency in {"USD", "USIC"}:
+            nav = float(amount)
+            fx_used = 1.0
+            currency = "USD"
+        elif currency == "HKD":
+            if fx is None or fx <= 0:
+                continue
+            nav = float(amount) * float(fx)
+            fx_used = float(fx)
+        else:
+            continue
+        source = str(row.get("source") or "nav").strip().lower() or "nav"
+        by_date[day] = {
+            "date": day,
+            "nav": nav,
+            "currency": currency,
+            "fx": fx_used,
+            "source": source,
+        }
+    return [by_date[day] for day in sorted(by_date)]
+
+
+def nav_in_window(points: list[dict], start: date | None, end: date | None) -> list[dict]:
+    """NAV observations whose date falls in the inclusive period window."""
+    chosen = []
+    for point in points:
+        day = point["date"]
+        if isinstance(day, str):
+            day = date.fromisoformat(day[:10])
+        if start is not None and day < start:
+            continue
+        if end is not None and day > end:
+            continue
+        chosen.append(point)
+    return chosen
+
+
+def nav_summary(points: list[dict], goal: float = NAV_GOAL) -> dict:
+    """Latest NAV in view, percent of the goal, and the dollar gap. Not P&L."""
+    if not points:
+        return {"latest": None, "pct": None, "gap": None, "placeholder": False, "hkd": False, "goal": float(goal)}
+    latest = float(points[-1]["nav"])
+    return {
+        "latest": latest,
+        "pct": (100.0 * latest / float(goal)) if goal else None,
+        "gap": float(goal) - latest,
+        "placeholder": any(str(point.get("source") or "") == "placeholder" for point in points),
+        "hkd": any(str(point.get("currency") or "").upper() == "HKD" for point in points),
+        "goal": float(goal),
+    }
+
+
 def weekly_equity(rows: list[RoundTrip]) -> list[dict]:
     if not rows:
         return []
@@ -1254,11 +1332,24 @@ def audit_payload(audit: dict) -> str:
                 "extras": extras,
             }
         )
+    nav_rows = []
+    for point in audit.get("nav") or []:
+        nav_rows.append(
+            {
+                "date": _nav_day(point).isoformat(),
+                "nav": float(point["nav"]),
+                "currency": point.get("currency") or "USD",
+                "fx": float(point.get("fx") or 1.0),
+                "source": point.get("source") or "nav",
+            }
+        )
     payload = {
         "trips": trips,
         "columns": sorted(audit["columns"]),
         "exitMin": trips[0]["exitDate"] if trips else None,
         "exitMax": trips[-1]["exitDate"] if trips else None,
+        "nav": nav_rows,
+        "navGoal": float(audit.get("nav_goal") or NAV_GOAL),
     }
     raw = json.dumps(payload, separators=(",", ":"), allow_nan=False)
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
@@ -1383,6 +1474,102 @@ def diverging_html(rows: list[dict], label_key="key", share: bool = False) -> st
             f'<div class="amt {_cls_money(pnl)}">{amount}</div></div>'
         )
     return "\n".join(parts)
+
+
+def _nav_day(point: dict) -> date:
+    day = point["date"]
+    if isinstance(day, str):
+        return date.fromisoformat(day[:10])
+    return day
+
+
+def pool_svg(points: list[dict], goal: float = NAV_GOAL) -> str:
+    """Water filling a tank toward the $1,000,000 goal, with the NAV path on the surface."""
+    if not points:
+        return '<p class="empty">No NAV points in this period. The $1,000,000 goal is unchanged.</p>'
+    navs = [float(point["nav"]) for point in points]
+    peak = max(float(goal), max(navs))
+    ymax = peak * 1.06
+    ymin = 0.0
+    width, height = 960, 300
+    pad_l, pad_r, pad_t, pad_b = 112, 24, 28, 36
+    inner_w = width - pad_l - pad_r
+    inner_h = height - pad_t - pad_b
+
+    def y_at(value: float) -> float:
+        return pad_t + inner_h * (1 - (value - ymin) / (ymax - ymin))
+
+    def x_at(index: int) -> float:
+        if len(points) == 1:
+            return pad_l + inner_w / 2
+        return pad_l + inner_w * index / (len(points) - 1)
+
+    coords = [(x_at(i), y_at(nav)) for i, nav in enumerate(navs)]
+    baseline = y_at(0.0)
+    surface = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    water = f"{coords[0][0]:.1f},{baseline:.1f} " + surface + f" {coords[-1][0]:.1f},{baseline:.1f}"
+    goal_y = y_at(float(goal))
+    ticks = []
+    for mark in (0, 250_000, 500_000, 750_000, 1_000_000):
+        if ymin - 1 <= mark <= ymax + 1:
+            y = y_at(float(mark))
+            ticks.append(
+                f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
+                f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(mark))}</text>'
+            )
+    label_step = max(1, len(points) // 6)
+    labels = []
+    for i, point in enumerate(points):
+        if i % label_step != 0 and i != len(points) - 1:
+            continue
+        labels.append(
+            f'<text x="{x_at(i):.1f}" y="{height - 10}" text-anchor="middle" class="tick">'
+            f'{esc(fmt_date(_nav_day(point), with_year=False))}</text>'
+        )
+    end_x, end_y = coords[-1]
+    latest = navs[-1]
+    pct = 100.0 * latest / float(goal) if goal else 0.0
+    end_label = f"{fmt_plain_money(latest)} · {fmt_pct(pct, 1)}"
+    tank_h = y_at(0.0) - goal_y
+    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="USD NAV path ending at {esc(end_label)} of the $1,000,000 goal">
+      <defs>
+        <linearGradient id="poolFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.62"/>
+          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.14"/>
+        </linearGradient>
+      </defs>
+      {''.join(ticks)}
+      <rect x="{pad_l}" y="{goal_y:.1f}" width="{inner_w:.1f}" height="{tank_h:.1f}" class="pool-tank"/>
+      <polygon points="{water}" fill="url(#poolFill)"/>
+      <line x1="{pad_l}" y1="{goal_y:.1f}" x2="{width - pad_r}" y2="{goal_y:.1f}" class="pool-goal"/>
+      <text x="{width - pad_r - 8}" y="{max(16, goal_y - 8):.1f}" text-anchor="end" class="pool-goal-label">$1,000,000 goal</text>
+      <polyline points="{surface}" class="pool-line"/>
+      <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>
+      <text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>
+      {''.join(labels)}
+    </svg>'''
+
+
+def pool_section(points: list[dict], goal: float = NAV_GOAL) -> str:
+    summary = nav_summary(points, goal)
+    flag = "Placeholder series — not account NAV. Replace data/nav_history.csv." if summary["placeholder"] else ""
+    nav_txt = "—" if summary["latest"] is None else fmt_plain_money(summary["latest"])
+    pct_txt = "—" if summary["pct"] is None else fmt_pct(summary["pct"], 1)
+    gap_txt = "—" if summary["gap"] is None else fmt_plain_money(summary["gap"])
+    note = "USD converted from HKD at fx_to_usd." if summary["hkd"] else "USD."
+    note += " Last point in the selected period. Gap is $1,000,000 − NAV. Not included in Net P&amp;L."
+    return f'''<section class="card" id="pool">
+      <p class="section-k">Goal</p>
+      <h2>Swimming pool</h2>
+      <p class="pool-flag" id="pool-flag">{esc(flag)}</p>
+      <div class="pool-readout">
+        <div><span>NAV</span><strong id="pool-nav">{nav_txt}</strong></div>
+        <div><span>Of $1,000,000 goal</span><strong id="pool-pct">{pct_txt}</strong></div>
+        <div><span>Gap</span><strong id="pool-gap">{gap_txt}</strong></div>
+      </div>
+      <p class="note" id="pool-note">{note}</p>
+      <div id="pool-chart">{pool_svg(points, goal)}</div>
+    </section>'''
 
 
 def equity_svg(points: list[dict]) -> str:
@@ -1936,6 +2123,37 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--yellow);
   letter-spacing: 0.03em;
 }
+.pool-flag {
+  margin: 0.35rem 0 0;
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+}
+.pool-flag:empty { display: none; }
+.pool-readout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 0.35rem;
+}
+.pool-readout div { display: flex; flex-direction: column; gap: 0.15rem; }
+.pool-readout span {
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.pool-readout strong {
+  font-size: 1.55rem;
+  color: #f4f7fb;
+  font-variant-numeric: tabular-nums;
+}
+.pool-tank { fill: rgba(0, 240, 255, 0.05); stroke: rgba(0, 240, 255, 0.45); stroke-width: 1.4; }
+.pool-line { fill: none; stroke: #f4f7fb; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.pool-goal { stroke: var(--yellow); stroke-width: 1.5; stroke-dasharray: 7 5; }
+.pool-goal-label { fill: var(--yellow); font-size: 13px; font-family: var(--mono); }
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1943,6 +2161,7 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 @media (max-width: 640px) {
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pool-readout { grid-template-columns: 1fr; }
   .leak { grid-template-columns: 1fr auto; }
   .leak-n { grid-column: 1; }
   .divbar { grid-template-columns: 1fr; }
@@ -2140,6 +2359,7 @@ def render_html(audit: dict) -> str:
       <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
       <div id="equity-chart">{equity_svg(audit["weekly"])}</div>
     </section>
+    {pool_section(audit.get("nav") or [], audit.get("nav_goal") or NAV_GOAL)}
     <section class="pair">
       <article class="card focus">
         <p class="section-k">Focus</p>
@@ -2292,6 +2512,7 @@ def public_summary(audit: dict) -> dict:
         "open_unreal": None
         if not any(row.get("unreal") is not None for row in audit["open_rows"])
         else float(pysum(row["unreal"] for row in audit["open_rows"] if row.get("unreal") is not None)),
+        "nav_usd": None if not audit.get("nav") else float(audit["nav"][-1]["nav"]),
     }
     return to_py(summary)
 
@@ -2303,6 +2524,8 @@ def build_page(root: Path | None = None, today: date | None = None, fetch_quotes
     quote = apply_yahoo_last(positions) if fetch_quotes else None
     safety = load_safety(root)
     audit = assemble(fills, columns, positions, safety, today=today)
+    audit["nav"] = load_nav(root / "data" / "nav_history.csv")
+    audit["nav_goal"] = NAV_GOAL
     if quote is not None:
         audit["quote"] = quote
     html_text = render_html(audit)

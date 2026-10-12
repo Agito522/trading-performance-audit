@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -221,6 +222,8 @@ class SampleTests(unittest.TestCase):
         summary = cp.build_page(ROOT, today=date(2026, 10, 11), fetch_quotes=False)
         self.assertEqual(summary["round_trips"], 5)
         self.assertAlmostEqual(summary["net_pnl"], 3865.05, places=2)
+        self.assertAlmostEqual(summary["nav_usd"], 340000.0)
+        self.assertNotAlmostEqual(summary["nav_usd"], summary["net_pnl"], places=0)
         self.assertEqual(summary["open_positions"], 24)
         self.assertEqual(summary["today_pnl"], 0)
         self.assertAlmostEqual(summary["win_rate"], 100.0)
@@ -255,6 +258,9 @@ class SampleTests(unittest.TestCase):
             "MTD",
             "Last 30 days",
             "Full CSV range",
+            "Swimming pool",
+            "Placeholder series",
+            "$1,000,000 goal",
             "Yahoo Finance",
             "Same day",
             "Overnight",
@@ -612,6 +618,93 @@ class StockBarTests(unittest.TestCase):
         self.assertIn(">DELL<", html)
         dell = html.split(">DELL<", 1)[1]
         self.assertIn('class="num flat">—', dell)
+
+
+class PoolTests(unittest.TestCase):
+    def test_placeholder_usd_series_and_window(self):
+        points = cp.load_nav(ROOT / "data" / "nav_history.csv")
+        self.assertEqual([point["date"] for point in points], [
+            date(2026, 7, 3),
+            date(2026, 7, 31),
+            date(2026, 8, 28),
+            date(2026, 9, 25),
+            date(2026, 10, 9),
+        ])
+        self.assertTrue(all(point["currency"] == "USD" and point["source"] == "placeholder" for point in points))
+        summary = cp.nav_summary(points)
+        self.assertAlmostEqual(summary["latest"], 340000)
+        self.assertAlmostEqual(summary["pct"], 34.0)
+        self.assertAlmostEqual(summary["gap"], 660000)
+        self.assertTrue(summary["placeholder"])
+        self.assertFalse(summary["hkd"])
+        week = cp.nav_in_window(points, *cp.preset_bounds("week", date(2026, 10, 12)))
+        self.assertEqual(week, [])
+        month = cp.nav_in_window(points, *cp.preset_bounds("mtd", date(2026, 10, 12)))
+        self.assertEqual([point["date"] for point in month], [date(2026, 10, 9)])
+        trail = cp.nav_in_window(points, *cp.preset_bounds("d30", date(2026, 10, 12)))
+        self.assertEqual([point["date"] for point in trail], [date(2026, 9, 25), date(2026, 10, 9)])
+        html = cp.pool_section(points)
+        self.assertIn('id="pool-nav">$340,000', html)
+        self.assertIn('id="pool-pct">34.0%', html)
+        self.assertIn('id="pool-gap">$660,000', html)
+        self.assertIn("Not included in Net P&amp;L", html)
+        self.assertIn("$1,000,000 goal", html)
+        self.assertNotIn("SAMPLE", html)
+
+    def test_hkd_converts_and_bad_rows_drop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nav_history.csv"
+            path.write_text(
+                "date,amount,currency,fx_to_usd,source\n"
+                "2026-08-01,800000,HKD,0.128,account\n"
+                "2026-08-02,100,HKD,,account\n"
+                "2026-08-03,50,EUR,1.1,account\n",
+                encoding="utf-8",
+            )
+            points = cp.load_nav(path)
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["currency"], "HKD")
+        self.assertAlmostEqual(points[0]["nav"], 102400)
+        summary = cp.nav_summary(points)
+        self.assertAlmostEqual(summary["pct"], 10.24)
+        self.assertAlmostEqual(summary["gap"], 897600)
+        self.assertTrue(summary["hkd"])
+        self.assertFalse(summary["placeholder"])
+        self.assertIn("USD converted from HKD", cp.pool_section(points))
+
+    def test_js_pool_matches_python(self):
+        points = cp.load_nav(ROOT / "data" / "nav_history.csv")
+        payload = [
+            {
+                "date": point["date"].isoformat(),
+                "nav": point["nav"],
+                "currency": point["currency"],
+                "fx": point["fx"],
+                "source": point["source"],
+            }
+            for point in points
+        ]
+        script = (ROOT / "period_filter.js").read_text(encoding="utf-8")
+        runner = (
+            script
+            + "\nconst rows = "
+            + json.dumps(payload)
+            + ";\nconst week = navInWindow(rows, '2026-10-12', '2026-10-12');\n"
+            + "process.stdout.write(JSON.stringify({all: navSummary(rows, 1000000), week: navSummary(week, 1000000), mtd: navSummary(navInWindow(rows, '2026-10-01', '2026-10-12'), 1000000), svg: poolSvg(rows, 1000000)}));"
+        )
+        proc = subprocess.run(["node", "-e", runner], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        got = json.loads(proc.stdout)
+        summary = cp.nav_summary(points)
+        self.assertAlmostEqual(got["all"]["latest"], summary["latest"])
+        self.assertAlmostEqual(got["all"]["pct"], summary["pct"])
+        self.assertAlmostEqual(got["all"]["gap"], summary["gap"])
+        self.assertTrue(got["all"]["placeholder"])
+        self.assertIsNone(got["week"]["latest"])
+        self.assertEqual(got["mtd"]["latest"], 340000)
+        squash = lambda text: re.sub(r">\s+<", "><", text)
+        self.assertEqual(squash(got["svg"]), squash(cp.pool_svg(points)))
+        self.assertIsNone(cp.nav_summary([])["latest"])
 
 
 def math_isinf(value) -> bool:
