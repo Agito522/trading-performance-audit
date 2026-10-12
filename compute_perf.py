@@ -883,6 +883,85 @@ def max_drawdown(rows: list[RoundTrip]) -> dict:
     return {"dollars": worst, "pct": pct, "trough": trough}
 
 
+NAV_GOAL = 1_000_000.0
+
+
+def load_nav(path: Path) -> list[dict]:
+    """USD NAV points from data/nav_history.csv. HKD rows convert at fx_to_usd."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8-sig").strip()
+    if not text:
+        return []
+    by_date: dict[date, dict] = {}
+    for row in csv.DictReader(text.splitlines()):
+        if not row:
+            continue
+        raw_day = str(row.get("date") or row.get("Date") or "").strip()
+        if len(raw_day) < 10:
+            continue
+        try:
+            day = date.fromisoformat(raw_day[:10])
+        except ValueError:
+            continue
+        amount = parse_number(row.get("amount", row.get("nav", row.get("nav_usd"))))
+        if amount is None or amount < 0:
+            continue
+        currency = str(row.get("currency") or "USD").strip().upper() or "USD"
+        fx = parse_number(row.get("fx_to_usd", row.get("fx")))
+        if currency in {"USD", "USIC"}:
+            nav = float(amount)
+            fx_used = 1.0
+            currency = "USD"
+        elif currency == "HKD":
+            if fx is None or fx <= 0:
+                continue
+            nav = float(amount) * float(fx)
+            fx_used = float(fx)
+        else:
+            continue
+        source = str(row.get("source") or "nav").strip().lower() or "nav"
+        by_date[day] = {
+            "date": day,
+            "nav": nav,
+            "currency": currency,
+            "fx": fx_used,
+            "source": source,
+        }
+    return [by_date[day] for day in sorted(by_date)]
+
+
+def nav_in_window(points: list[dict], start: date | None, end: date | None) -> list[dict]:
+    """NAV observations whose date falls in the inclusive period window."""
+    chosen = []
+    for point in points:
+        day = point["date"]
+        if isinstance(day, str):
+            day = date.fromisoformat(day[:10])
+        if start is not None and day < start:
+            continue
+        if end is not None and day > end:
+            continue
+        chosen.append(point)
+    return chosen
+
+
+def nav_summary(points: list[dict], goal: float = NAV_GOAL) -> dict:
+    """Latest NAV in view, percent of the goal, and the dollar gap. Not P&L."""
+    if not points:
+        return {"latest": None, "pct": None, "gap": None, "gap_pct": None, "placeholder": False, "hkd": False, "goal": float(goal)}
+    latest = float(points[-1]["nav"])
+    return {
+        "latest": latest,
+        "pct": (100.0 * latest / float(goal)) if goal else None,
+        "gap": float(goal) - latest,
+        "gap_pct": (100.0 * (float(goal) - latest) / float(goal)) if goal else None,
+        "placeholder": any(str(point.get("source") or "") == "placeholder" for point in points),
+        "hkd": any(str(point.get("currency") or "").upper() == "HKD" for point in points),
+        "goal": float(goal),
+    }
+
+
 def weekly_equity(rows: list[RoundTrip]) -> list[dict]:
     if not rows:
         return []
@@ -1254,11 +1333,25 @@ def audit_payload(audit: dict) -> str:
                 "extras": extras,
             }
         )
+    nav_rows = []
+    for point in audit.get("nav") or []:
+        nav_rows.append(
+            {
+                "date": _nav_day(point).isoformat(),
+                "nav": float(point["nav"]),
+                "currency": point.get("currency") or "USD",
+                "fx": float(point.get("fx") or 1.0),
+                "source": point.get("source") or "nav",
+            }
+        )
     payload = {
         "trips": trips,
         "columns": sorted(audit["columns"]),
         "exitMin": trips[0]["exitDate"] if trips else None,
         "exitMax": trips[-1]["exitDate"] if trips else None,
+        "nav": nav_rows,
+        "navGoal": float(audit.get("nav_goal") or NAV_GOAL),
+        "chartYear": chart_year(audit.get("weekly"), audit.get("nav"), audit.get("today")),
     }
     raw = json.dumps(payload, separators=(",", ":"), allow_nan=False)
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
@@ -1385,64 +1478,215 @@ def diverging_html(rows: list[dict], label_key="key", share: bool = False) -> st
     return "\n".join(parts)
 
 
-def equity_svg(points: list[dict]) -> str:
-    if not points:
-        return '<p class="empty">No closed round trips yet. Drop fills into data/trades.csv and rerun compute_perf.py.</p>'
-    values = [0.0] + [float(p["pnl"]) for p in points]
-    width, height = 960, 320
-    pad_l, pad_r, pad_t, pad_b = 88, 24, 22, 36
+def _nav_day(point: dict) -> date:
+    day = point["date"]
+    if isinstance(day, str):
+        return date.fromisoformat(day[:10])
+    return day
+
+
+def gap_caption(summary: dict) -> str:
+    """How far NAV is from $1,000,000, as a percent of that goal. Not realized P&L."""
+    if summary.get("gap_pct") is None:
+        return "No NAV in this period"
+    pct = summary["gap_pct"]
+    text = f"{fmt_pct(pct, 1, signed=pct < 0)} gap to $1,000,000 USD"
+    if summary.get("placeholder"):
+        text += " · placeholder"
+    if summary.get("hkd"):
+        text += " · from HKD"
+    return text
+
+
+def _as_date(value) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def chart_year(points: list[dict] | None = None, nav: list[dict] | None = None, today: date | None = None) -> int:
+    """Calendar year for the fixed equity axis. Latest data year, else today."""
+    years = []
+    for point in points or []:
+        day = _as_date(point.get("week")) or _as_date(point.get("date"))
+        if day:
+            years.append(day.year)
+    for point in nav or []:
+        day = _as_date(point.get("date"))
+        if day:
+            years.append(day.year)
+    if years:
+        return max(years)
+    day = _as_date(today)
+    if day:
+        return day.year
+    return date.today().year
+
+
+def weekly_bars(points: list[dict]) -> str:
+    """Bar chart of realized P&L by exit week. Not NAV, and not the $1M gap."""
+    rows: list[tuple[date, float]] = []
+    for point in points or []:
+        day = _as_date(point.get("week"))
+        if day is None:
+            continue
+        raw = point["week_pnl"] if point.get("week_pnl") is not None else point.get("pnl")
+        pnl = float(raw or 0.0)
+        if abs(pnl) <= 1e-9:
+            continue
+        rows.append((day, pnl))
+    rows.sort(key=lambda item: item[0])
+    width, height = 960, 280
+    pad_l, pad_r, pad_t, pad_b = 88, 24, 28, 40
+    inner_w = width - pad_l - pad_r
+    inner_h = height - pad_t - pad_b
+    values = [pnl for _, pnl in rows] or [0.0]
     ymin = min(0.0, min(values))
     ymax = max(0.0, max(values))
     span = ymax - ymin or 1.0
-    ymin -= span * 0.08
-    ymax += span * 0.12
-    inner_w = width - pad_l - pad_r
-    inner_h = height - pad_t - pad_b
-
-    def x_at(i: int) -> float:
-        if len(values) == 1:
-            return pad_l
-        return pad_l + inner_w * i / (len(values) - 1)
+    ymin -= span * 0.12
+    ymax += span * 0.22
 
     def y_at(v: float) -> float:
         return pad_t + inner_h * (1 - (v - ymin) / (ymax - ymin))
 
-    coords = [(x_at(i), y_at(v)) for i, v in enumerate(values)]
-    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-    zero_y = y_at(0.0)
-    area = f"{coords[0][0]:.1f},{zero_y:.1f} " + line + f" {coords[-1][0]:.1f},{zero_y:.1f}"
-    ticks = _ticks(ymin, ymax)
     grid = []
-    for tick in ticks:
+    for tick in _ticks(ymin, ymax):
         y = y_at(tick)
         grid.append(
             f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
             f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(tick))}</text>'
         )
-    label_step = max(1, len(points) // 6)
-    labels = []
-    for i, point in enumerate(points):
-        if i % label_step != 0 and i != len(points) - 1:
-            continue
-        labels.append(
-            f'<text x="{x_at(i + 1):.1f}" y="{height - 10}" text-anchor="middle" class="tick">{esc(fmt_date(point["week"], with_year=False))}</text>'
+    zero_y = y_at(0.0)
+    bars = []
+    if rows:
+        slot = inner_w / len(rows)
+        bar_w = min(56.0, slot * 0.62)
+        step = max(1, len(rows) // 8)
+        for i, (day, pnl) in enumerate(rows):
+            center = pad_l + slot * (i + 0.5)
+            y1 = y_at(pnl)
+            top = min(zero_y, y1)
+            bar_h = max(2.0, abs(y1 - zero_y))
+            tone = "up" if pnl >= 0 else "dn"
+            bars.append(
+                f'<rect x="{center - bar_w / 2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{bar_h:.1f}" class="wk-{tone}"/>'
+            )
+            label_y = y1 - 8 if pnl >= 0 else y1 + 14
+            bars.append(
+                f'<text x="{center:.1f}" y="{label_y:.1f}" text-anchor="middle" class="bar-amt {tone}">{esc(fmt_money(pnl))}</text>'
+            )
+            if i % step == 0 or i == len(rows) - 1:
+                bars.append(
+                    f'<text x="{center:.1f}" y="{height - 12}" text-anchor="middle" class="tick">{esc(fmt_date(day, with_year=False))}</text>'
+                )
+    else:
+        bars.append(
+            f'<text x="{(pad_l + inner_w / 2):.1f}" y="{((pad_t + height - pad_b) / 2):.1f}" '
+            f'text-anchor="middle" class="tick">No closed round trips in this period</text>'
         )
-    end_x, end_y = coords[-1]
-    end_label = fmt_money(values[-1])
-    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="Weekly cumulative realized P and L ending at {esc(end_label)}">
-      <defs>
-        <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>
-          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>
-        </linearGradient>
-      </defs>
+    aria = "Weekly realized P and L"
+    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="{aria}">
       {''.join(grid)}
       <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{width - pad_r}" y2="{zero_y:.1f}" class="zero"/>
-      <polygon points="{area}" fill="url(#eqFill)"/>
-      <polyline points="{line}" class="eq-line"/>
-      <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>
-      <text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>
+      {''.join(bars)}
+    </svg>'''
+
+
+def nav_svg(points: list[dict], gap_text: str | None = None, year: int | None = None, goal: float = NAV_GOAL) -> str:
+    """NAV line on a fixed Jan 1–Dec 31 axis, with the percent gap to $1,000,000."""
+    axis_year = int(year) if year else chart_year(nav=points)
+    start = date(axis_year, 1, 1)
+    end = date(axis_year, 12, 31)
+    span_days = (end - start).days or 1
+    width, height = 960, 320
+    pad_l, pad_r, pad_t, pad_b = 88, 24, 28, 36
+    inner_w = width - pad_l - pad_r
+    inner_h = height - pad_t - pad_b
+    dated: list[tuple[date, float]] = []
+    for point in points or []:
+        day = _as_date(point.get("date"))
+        if day is None or day.year != axis_year:
+            continue
+        dated.append((day, float(point["nav"])))
+    dated.sort(key=lambda item: item[0])
+    goal_v = float(goal)
+    observed = [nav for _, nav in dated]
+    ymin = min([0.0, goal_v] + observed)
+    ymax = max([0.0, goal_v] + observed)
+    span = ymax - ymin or 1.0
+    ymin -= span * 0.04
+    ymax += span * 0.08
+
+    def x_at(day: date) -> float:
+        clamped = min(max(day, start), end)
+        return pad_l + inner_w * (clamped - start).days / span_days
+
+    def y_at(v: float) -> float:
+        return pad_t + inner_h * (1 - (v - ymin) / (ymax - ymin))
+
+    months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+    grid = []
+    for tick in _ticks(ymin, ymax):
+        y = y_at(tick)
+        grid.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
+            f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(tick))}</text>'
+        )
+    vlines = []
+    labels = []
+    for month in range(1, 12):
+        day = date(axis_year, month, 1)
+        x = x_at(day)
+        vlines.append(f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
+        text, anchor = ("1/1", "start") if month == 1 else (months[month - 1], "middle")
+        labels.append(f'<text x="{x:.1f}" y="{height - 10}" text-anchor="{anchor}" class="tick">{text}</text>')
+    x_end = x_at(end)
+    vlines.append(f'<line x1="{x_end:.1f}" y1="{pad_t}" x2="{x_end:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
+    labels.append(f'<text x="{x_end:.1f}" y="{height - 10}" text-anchor="end" class="tick">12/31</text>')
+    goal_y = y_at(goal_v)
+    goal_line = (
+        f'<line x1="{pad_l}" y1="{goal_y:.1f}" x2="{width - pad_r}" y2="{goal_y:.1f}" class="nav-goal"/>'
+        f'<text x="{pad_l + 8}" y="{max(pad_t + 12, goal_y - 6):.1f}" class="nav-goal-label">$1,000,000</text>'
+    )
+    if dated:
+        coords = [(x_at(day), y_at(nav)) for day, nav in dated]
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" class="nav-dot"/>' for x, y in coords)
+        end_x, end_y = coords[-1]
+        end_label = fmt_plain_money(dated[-1][1])
+        series = (
+            f'<polyline points="{line}" class="nav-line"/>'
+            f"{dots}"
+            f'<text x="{end_x + 8:.1f}" y="{max(16, end_y - 8):.1f}" class="nav-end">{esc(end_label)}</text>'
+        )
+        aria = f"NAV for {axis_year}, axis January 1 through December 31, ending at {end_label}"
+    else:
+        series = (
+            f'<text x="{(pad_l + inner_w / 2):.1f}" y="{((pad_t + height - pad_b) / 2):.1f}" '
+            f'text-anchor="middle" class="tick">No NAV in this period</text>'
+        )
+        aria = f"NAV for {axis_year}, axis January 1 through December 31"
+    corner = ""
+    if gap_text and gap_text != "No NAV in this period":
+        corner = f'<text x="{width - pad_r}" y="18" text-anchor="end" class="gap-label">{esc(gap_text)}</text>'
+    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(aria)}">
+      {''.join(grid)}
+      {''.join(vlines)}
+      {goal_line}
+      {series}
       {''.join(labels)}
+      {corner}
     </svg>'''
 
 
@@ -1936,6 +2180,23 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--yellow);
   letter-spacing: 0.03em;
 }
+.equity-gap {
+  margin: 0.35rem 0 0.15rem;
+  color: var(--yellow);
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+}
+.gap-label { fill: var(--yellow); font-size: 14px; font-family: var(--mono); }
+.wk-up { fill: var(--green-bar); }
+.wk-dn { fill: var(--red-bar); }
+.bar-amt { font-size: 12px; font-family: var(--mono); font-weight: 700; }
+.bar-amt.up { fill: var(--green); }
+.bar-amt.dn { fill: var(--red); }
+.nav-line { fill: none; stroke: var(--cyan); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.nav-dot { fill: var(--cyan); }
+.nav-goal { stroke: var(--yellow); stroke-width: 1.25; stroke-dasharray: 5 4; }
+.nav-goal-label { fill: var(--yellow); font-size: 12px; font-family: var(--mono); }
+.nav-end { fill: var(--cyan); font-size: 13px; font-weight: 700; font-family: var(--display); }
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2074,6 +2335,8 @@ def render_html(audit: dict) -> str:
 
     unreal_line = open_book_note(audit)
     generated = datetime.now(ET).strftime("%b %d, %Y %H:%M ET")
+    axis_year = chart_year(audit.get("weekly"), audit.get("nav"), audit.get("today"))
+    gap_text = gap_caption(nav_summary(audit.get("nav") or [], audit.get("nav_goal") or NAV_GOAL))
     exit_min = audit["closed"][0].exit.date() if audit["closed"] else None
     exit_max = audit["closed"][-1].exit.date() if audit["closed"] else None
     if exit_min and exit_max:
@@ -2135,10 +2398,17 @@ def render_html(audit: dict) -> str:
       <article class="kpi"><p class="k">Max Drawdown</p><p class="v neg" id="kpi-dd">{dd_txt}</p><p class="s" id="kpi-dd-sub">{esc(dd_sub)}</p></article>
     </section>
     <section class="card">
-      <p class="section-k">Equity curve</p>
-      <h2>Weekly cumulative P&amp;L</h2>
-      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
-      <div id="equity-chart">{equity_svg(audit["weekly"])}</div>
+      <p class="section-k">Weekly P&amp;L</p>
+      <h2>Realized by week</h2>
+      <p class="note" id="equity-note">Closed round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
+      <div id="equity-chart">{weekly_bars(audit["weekly"])}</div>
+    </section>
+    <section class="card">
+      <p class="section-k">NAV</p>
+      <h2>$1,000,000 USD</h2>
+      <p class="note" id="nav-note">Net asset value in USD. The horizontal axis is {axis_year}, January 1 through December 31. The gap percent is not added to Net P&amp;L.</p>
+      <p class="equity-gap" id="equity-gap">{esc(gap_text)}</p>
+      <div id="nav-chart">{nav_svg(audit.get("nav") or [], gap_text, year=axis_year, goal=audit.get("nav_goal") or NAV_GOAL)}</div>
     </section>
     <section class="pair">
       <article class="card focus">
@@ -2292,6 +2562,7 @@ def public_summary(audit: dict) -> dict:
         "open_unreal": None
         if not any(row.get("unreal") is not None for row in audit["open_rows"])
         else float(pysum(row["unreal"] for row in audit["open_rows"] if row.get("unreal") is not None)),
+        "nav_usd": None if not audit.get("nav") else float(audit["nav"][-1]["nav"]),
     }
     return to_py(summary)
 
@@ -2303,6 +2574,8 @@ def build_page(root: Path | None = None, today: date | None = None, fetch_quotes
     quote = apply_yahoo_last(positions) if fetch_quotes else None
     safety = load_safety(root)
     audit = assemble(fills, columns, positions, safety, today=today)
+    audit["nav"] = load_nav(root / "data" / "nav_history.csv")
+    audit["nav_goal"] = NAV_GOAL
     if quote is not None:
         audit["quote"] = quote
     html_text = render_html(audit)
