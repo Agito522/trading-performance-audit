@@ -949,12 +949,13 @@ def nav_in_window(points: list[dict], start: date | None, end: date | None) -> l
 def nav_summary(points: list[dict], goal: float = NAV_GOAL) -> dict:
     """Latest NAV in view, percent of the goal, and the dollar gap. Not P&L."""
     if not points:
-        return {"latest": None, "pct": None, "gap": None, "placeholder": False, "hkd": False, "goal": float(goal)}
+        return {"latest": None, "pct": None, "gap": None, "gap_pct": None, "placeholder": False, "hkd": False, "goal": float(goal)}
     latest = float(points[-1]["nav"])
     return {
         "latest": latest,
         "pct": (100.0 * latest / float(goal)) if goal else None,
         "gap": float(goal) - latest,
+        "gap_pct": (100.0 * (float(goal) - latest) / float(goal)) if goal else None,
         "placeholder": any(str(point.get("source") or "") == "placeholder" for point in points),
         "hkd": any(str(point.get("currency") or "").upper() == "HKD" for point in points),
         "goal": float(goal),
@@ -1350,6 +1351,7 @@ def audit_payload(audit: dict) -> str:
         "exitMax": trips[-1]["exitDate"] if trips else None,
         "nav": nav_rows,
         "navGoal": float(audit.get("nav_goal") or NAV_GOAL),
+        "chartYear": chart_year(audit.get("weekly"), audit.get("nav"), audit.get("today")),
     }
     raw = json.dumps(payload, separators=(",", ":"), allow_nan=False)
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
@@ -1483,140 +1485,142 @@ def _nav_day(point: dict) -> date:
     return day
 
 
-def pool_svg(points: list[dict], goal: float = NAV_GOAL) -> str:
-    """Water filling a tank toward the $1,000,000 goal, with the NAV path on the surface."""
-    if not points:
-        return '<p class="empty">No NAV points in this period. The $1,000,000 goal is unchanged.</p>'
-    navs = [float(point["nav"]) for point in points]
-    peak = max(float(goal), max(navs))
-    ymax = peak * 1.06
-    ymin = 0.0
-    width, height = 960, 300
-    pad_l, pad_r, pad_t, pad_b = 112, 24, 28, 36
-    inner_w = width - pad_l - pad_r
-    inner_h = height - pad_t - pad_b
-
-    def y_at(value: float) -> float:
-        return pad_t + inner_h * (1 - (value - ymin) / (ymax - ymin))
-
-    def x_at(index: int) -> float:
-        if len(points) == 1:
-            return pad_l + inner_w / 2
-        return pad_l + inner_w * index / (len(points) - 1)
-
-    coords = [(x_at(i), y_at(nav)) for i, nav in enumerate(navs)]
-    baseline = y_at(0.0)
-    surface = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-    water = f"{coords[0][0]:.1f},{baseline:.1f} " + surface + f" {coords[-1][0]:.1f},{baseline:.1f}"
-    goal_y = y_at(float(goal))
-    ticks = []
-    for mark in (0, 250_000, 500_000, 750_000, 1_000_000):
-        if ymin - 1 <= mark <= ymax + 1:
-            y = y_at(float(mark))
-            ticks.append(
-                f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
-                f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(mark))}</text>'
-            )
-    label_step = max(1, len(points) // 6)
-    labels = []
-    for i, point in enumerate(points):
-        if i % label_step != 0 and i != len(points) - 1:
-            continue
-        labels.append(
-            f'<text x="{x_at(i):.1f}" y="{height - 10}" text-anchor="middle" class="tick">'
-            f'{esc(fmt_date(_nav_day(point), with_year=False))}</text>'
-        )
-    end_x, end_y = coords[-1]
-    latest = navs[-1]
-    pct = 100.0 * latest / float(goal) if goal else 0.0
-    end_label = f"{fmt_plain_money(latest)} · {fmt_pct(pct, 1)}"
-    tank_h = y_at(0.0) - goal_y
-    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="USD NAV path ending at {esc(end_label)} of the $1,000,000 goal">
-      <defs>
-        <linearGradient id="poolFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.62"/>
-          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.14"/>
-        </linearGradient>
-      </defs>
-      {''.join(ticks)}
-      <rect x="{pad_l}" y="{goal_y:.1f}" width="{inner_w:.1f}" height="{tank_h:.1f}" class="pool-tank"/>
-      <polygon points="{water}" fill="url(#poolFill)"/>
-      <line x1="{pad_l}" y1="{goal_y:.1f}" x2="{width - pad_r}" y2="{goal_y:.1f}" class="pool-goal"/>
-      <text x="{width - pad_r - 8}" y="{max(16, goal_y - 8):.1f}" text-anchor="end" class="pool-goal-label">$1,000,000 goal</text>
-      <polyline points="{surface}" class="pool-line"/>
-      <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>
-      <text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>
-      {''.join(labels)}
-    </svg>'''
+def gap_caption(summary: dict) -> str:
+    """How far NAV is from $1,000,000, as a percent of that goal. Not realized P&L."""
+    if summary.get("gap_pct") is None:
+        return "No NAV in this period"
+    pct = summary["gap_pct"]
+    text = f"{fmt_pct(pct, 1, signed=pct < 0)} gap to $1,000,000 USD"
+    if summary.get("placeholder"):
+        text += " · placeholder"
+    if summary.get("hkd"):
+        text += " · from HKD"
+    return text
 
 
-def pool_section(points: list[dict], goal: float = NAV_GOAL) -> str:
-    summary = nav_summary(points, goal)
-    flag = "Placeholder series — not account NAV. Replace data/nav_history.csv." if summary["placeholder"] else ""
-    nav_txt = "—" if summary["latest"] is None else fmt_plain_money(summary["latest"])
-    pct_txt = "—" if summary["pct"] is None else fmt_pct(summary["pct"], 1)
-    gap_txt = "—" if summary["gap"] is None else fmt_plain_money(summary["gap"])
-    note = "USD converted from HKD at fx_to_usd." if summary["hkd"] else "USD."
-    note += " Last point in the selected period. Gap is $1,000,000 − NAV. Not included in Net P&amp;L."
-    return f'''<section class="card" id="pool">
-      <p class="section-k">Goal</p>
-      <h2>Swimming pool</h2>
-      <p class="pool-flag" id="pool-flag">{esc(flag)}</p>
-      <div class="pool-readout">
-        <div><span>NAV</span><strong id="pool-nav">{nav_txt}</strong></div>
-        <div><span>Of $1,000,000 goal</span><strong id="pool-pct">{pct_txt}</strong></div>
-        <div><span>Gap</span><strong id="pool-gap">{gap_txt}</strong></div>
-      </div>
-      <p class="note" id="pool-note">{note}</p>
-      <div id="pool-chart">{pool_svg(points, goal)}</div>
-    </section>'''
+def _as_date(value) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if len(text) < 10:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
 
 
-def equity_svg(points: list[dict]) -> str:
-    if not points:
-        return '<p class="empty">No closed round trips yet. Drop fills into data/trades.csv and rerun compute_perf.py.</p>'
-    values = [0.0] + [float(p["pnl"]) for p in points]
+def chart_year(points: list[dict] | None = None, nav: list[dict] | None = None, today: date | None = None) -> int:
+    """Calendar year for the fixed equity axis. Latest data year, else today."""
+    years = []
+    for point in points or []:
+        day = _as_date(point.get("week")) or _as_date(point.get("date"))
+        if day:
+            years.append(day.year)
+    for point in nav or []:
+        day = _as_date(point.get("date"))
+        if day:
+            years.append(day.year)
+    if years:
+        return max(years)
+    day = _as_date(today)
+    if day:
+        return day.year
+    return date.today().year
+
+
+def equity_svg(points: list[dict], gap_text: str | None = None, year: int | None = None) -> str:
+    """Realized equity on a fixed Jan 1–Dec 31 axis. Points keep their dates."""
+    axis_year = int(year) if year else chart_year(points)
+    start = date(axis_year, 1, 1)
+    end = date(axis_year, 12, 31)
+    span_days = (end - start).days or 1
     width, height = 960, 320
     pad_l, pad_r, pad_t, pad_b = 88, 24, 22, 36
+    inner_w = width - pad_l - pad_r
+    inner_h = height - pad_t - pad_b
+    dated = []
+    for point in points or []:
+        day = _as_date(point.get("week"))
+        if day is None or day.year != axis_year:
+            continue
+        dated.append((day, float(point["pnl"])))
+    dated.sort(key=lambda item: item[0])
+    series: list[tuple[date, float]] = []
+    if dated:
+        anchor = dated[0][0] - timedelta(days=7)
+        if anchor < start:
+            anchor = start
+        if dated[0][1] != 0.0:
+            series.append((anchor, 0.0))
+        series.extend(dated)
+    values = [pnl for _, pnl in series] or [0.0]
     ymin = min(0.0, min(values))
     ymax = max(0.0, max(values))
     span = ymax - ymin or 1.0
     ymin -= span * 0.08
     ymax += span * 0.12
-    inner_w = width - pad_l - pad_r
-    inner_h = height - pad_t - pad_b
 
-    def x_at(i: int) -> float:
-        if len(values) == 1:
-            return pad_l
-        return pad_l + inner_w * i / (len(values) - 1)
+    def x_at(day: date) -> float:
+        clamped = min(max(day, start), end)
+        return pad_l + inner_w * (clamped - start).days / span_days
 
     def y_at(v: float) -> float:
         return pad_t + inner_h * (1 - (v - ymin) / (ymax - ymin))
 
-    coords = [(x_at(i), y_at(v)) for i, v in enumerate(values)]
-    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-    zero_y = y_at(0.0)
-    area = f"{coords[0][0]:.1f},{zero_y:.1f} " + line + f" {coords[-1][0]:.1f},{zero_y:.1f}"
-    ticks = _ticks(ymin, ymax)
+    months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
     grid = []
-    for tick in ticks:
+    for tick in _ticks(ymin, ymax):
         y = y_at(tick)
         grid.append(
             f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
             f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(tick))}</text>'
         )
-    label_step = max(1, len(points) // 6)
+    vlines = []
     labels = []
-    for i, point in enumerate(points):
-        if i % label_step != 0 and i != len(points) - 1:
-            continue
-        labels.append(
-            f'<text x="{x_at(i + 1):.1f}" y="{height - 10}" text-anchor="middle" class="tick">{esc(fmt_date(point["week"], with_year=False))}</text>'
+    for month in range(1, 12):
+        day = date(axis_year, month, 1)
+        x = x_at(day)
+        vlines.append(f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
+        if month == 1:
+            text, anchor = "1/1", "start"
+        else:
+            text, anchor = months[month - 1], "middle"
+        labels.append(f'<text x="{x:.1f}" y="{height - 10}" text-anchor="{anchor}" class="tick">{text}</text>')
+    x_end = x_at(end)
+    vlines.append(f'<line x1="{x_end:.1f}" y1="{pad_t}" x2="{x_end:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
+    labels.append(f'<text x="{x_end:.1f}" y="{height - 10}" text-anchor="end" class="tick">12/31</text>')
+    zero_y = y_at(0.0)
+    line = ""
+    area = ""
+    marker = ""
+    if series:
+        coords = [(x_at(day), y_at(pnl)) for day, pnl in series]
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        area = f"{coords[0][0]:.1f},{zero_y:.1f} " + line + f" {coords[-1][0]:.1f},{zero_y:.1f}"
+        end_x, end_y = coords[-1]
+        end_label = fmt_money(series[-1][1])
+        marker = (
+            f'<polygon points="{area}" fill="url(#eqFill)"/>'
+            f'<polyline points="{line}" class="eq-line"/>'
+            f'<circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>'
+            f'<text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>'
         )
-    end_x, end_y = coords[-1]
-    end_label = fmt_money(values[-1])
-    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="Weekly cumulative realized P and L ending at {esc(end_label)}">
+    else:
+        end_label = "—"
+        marker = (
+            f'<text x="{(pad_l + inner_w / 2):.1f}" y="{((pad_t + height - pad_b) / 2):.1f}" '
+            f'text-anchor="middle" class="tick">No closed round trips in this period</text>'
+        )
+    aria = f"Weekly cumulative realized P and L for {axis_year}, axis January 1 through December 31"
+    if series:
+        aria += f", ending at {end_label}"
+    gap = f'<text x="{width - pad_r}" y="16" text-anchor="end" class="gap-label">{esc(gap_text)}</text>' if gap_text else ""
+    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(aria)}">
       <defs>
         <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>
@@ -1624,12 +1628,11 @@ def equity_svg(points: list[dict]) -> str:
         </linearGradient>
       </defs>
       {''.join(grid)}
+      {''.join(vlines)}
       <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{width - pad_r}" y2="{zero_y:.1f}" class="zero"/>
-      <polygon points="{area}" fill="url(#eqFill)"/>
-      <polyline points="{line}" class="eq-line"/>
-      <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>
-      <text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>
+      {marker}
       {''.join(labels)}
+      {gap}
     </svg>'''
 
 
@@ -2123,37 +2126,13 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--yellow);
   letter-spacing: 0.03em;
 }
-.pool-flag {
-  margin: 0.35rem 0 0;
+.equity-gap {
+  margin: 0.35rem 0 0.15rem;
   color: var(--yellow);
   font-family: var(--mono);
-  font-size: 0.82rem;
   letter-spacing: 0.03em;
 }
-.pool-flag:empty { display: none; }
-.pool-readout {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin: 0.75rem 0 0.35rem;
-}
-.pool-readout div { display: flex; flex-direction: column; gap: 0.15rem; }
-.pool-readout span {
-  color: var(--cyan);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.pool-readout strong {
-  font-size: 1.55rem;
-  color: #f4f7fb;
-  font-variant-numeric: tabular-nums;
-}
-.pool-tank { fill: rgba(0, 240, 255, 0.05); stroke: rgba(0, 240, 255, 0.45); stroke-width: 1.4; }
-.pool-line { fill: none; stroke: #f4f7fb; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
-.pool-goal { stroke: var(--yellow); stroke-width: 1.5; stroke-dasharray: 7 5; }
-.pool-goal-label { fill: var(--yellow); font-size: 13px; font-family: var(--mono); }
+.gap-label { fill: var(--yellow); font-size: 14px; font-family: var(--mono); }
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2161,7 +2140,6 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 @media (max-width: 640px) {
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pool-readout { grid-template-columns: 1fr; }
   .leak { grid-template-columns: 1fr auto; }
   .leak-n { grid-column: 1; }
   .divbar { grid-template-columns: 1fr; }
@@ -2293,6 +2271,8 @@ def render_html(audit: dict) -> str:
 
     unreal_line = open_book_note(audit)
     generated = datetime.now(ET).strftime("%b %d, %Y %H:%M ET")
+    axis_year = chart_year(audit.get("weekly"), audit.get("nav"), audit.get("today"))
+    gap_text = gap_caption(nav_summary(audit.get("nav") or [], audit.get("nav_goal") or NAV_GOAL))
     exit_min = audit["closed"][0].exit.date() if audit["closed"] else None
     exit_max = audit["closed"][-1].exit.date() if audit["closed"] else None
     if exit_min and exit_max:
@@ -2356,10 +2336,10 @@ def render_html(audit: dict) -> str:
     <section class="card">
       <p class="section-k">Equity curve</p>
       <h2>Weekly cumulative P&amp;L</h2>
-      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
-      <div id="equity-chart">{equity_svg(audit["weekly"])}</div>
+      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)} The horizontal axis is {axis_year}, January 1 through December 31. The gap percent is NAV versus the goal, not this curve.</p>
+      <p class="equity-gap" id="equity-gap">{esc(gap_text)}</p>
+      <div id="equity-chart">{equity_svg(audit["weekly"], gap_text, year=axis_year)}</div>
     </section>
-    {pool_section(audit.get("nav") or [], audit.get("nav_goal") or NAV_GOAL)}
     <section class="pair">
       <article class="card focus">
         <p class="section-k">Focus</p>

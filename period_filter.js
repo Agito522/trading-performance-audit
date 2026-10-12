@@ -620,61 +620,95 @@ function ticks(ymin, ymax) {
   return out;
 }
 
-function equitySvg(points) {
-  if (!points.length) {
-    return '<p class="empty">No closed round trips yet. Drop fills into data/trades.csv and rerun compute_perf.py.</p>';
-  }
-  const values = [0].concat(points.map((point) => point.pnl));
+function equitySvg(points, gapText, year) {
+  const dated = (points || []).filter((point) => point && point.week).map((point) => ({
+    week: String(point.week).slice(0, 10),
+    pnl: Number(point.pnl),
+  })).sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
+  const axisYear = Number(year) || (dated.length ? Number(dated[dated.length - 1].week.slice(0, 4)) : new Date().getUTCFullYear());
+  const start = axisYear + "-01-01";
+  const end = axisYear + "-12-31";
+  const spanDays = Math.round((Date.UTC(axisYear, 11, 31) - Date.UTC(axisYear, 0, 1)) / 86400000) || 1;
   const width = 960;
   const height = 320;
   const padL = 88;
   const padR = 24;
   const padT = 22;
   const padB = 36;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  const inYear = dated.filter((point) => Number(point.week.slice(0, 4)) === axisYear);
+  const series = [];
+  if (inYear.length) {
+    let anchor = addDays(inYear[0].week, -7);
+    if (anchor < start) anchor = start;
+    if (inYear[0].pnl !== 0) series.push({ week: anchor, pnl: 0 });
+    inYear.forEach((point) => series.push(point));
+  }
+  const values = series.length ? series.map((point) => point.pnl) : [0];
   let ymin = Math.min.apply(null, [0].concat(values));
   let ymax = Math.max.apply(null, [0].concat(values));
   const span = ymax - ymin || 1;
   ymin -= span * 0.08;
   ymax += span * 0.12;
-  const innerW = width - padL - padR;
-  const innerH = height - padT - padB;
-  function xAt(i) {
-    if (values.length === 1) return padL;
-    return padL + (innerW * i) / (values.length - 1);
+  function dayIndex(iso) {
+    const parts = String(iso).slice(0, 10).split("-").map(Number);
+    const clamped = Math.min(Math.max(Date.UTC(parts[0], parts[1] - 1, parts[2]), Date.UTC(axisYear, 0, 1)), Date.UTC(axisYear, 11, 31));
+    return Math.round((clamped - Date.UTC(axisYear, 0, 1)) / 86400000);
+  }
+  function xAt(iso) {
+    return padL + (innerW * dayIndex(iso)) / spanDays;
   }
   function yAt(v) {
     return padT + innerH * (1 - (v - ymin) / (ymax - ymin));
   }
-  const coords = values.map((v, i) => [xAt(i), yAt(v)]);
-  const line = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
-  const zeroY = yAt(0);
-  const area = coords[0][0].toFixed(1) + "," + zeroY.toFixed(1) + " " + line + " " + coords[coords.length - 1][0].toFixed(1) + "," + zeroY.toFixed(1);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const grid = ticks(ymin, ymax).map((tick) => {
     const y = yAt(tick);
     return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + y.toFixed(1) + '" class="grid"/>'
       + '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="tick">' + esc(fmtPlainMoney(tick)) + "</text>";
   }).join("");
-  const labelStep = Math.max(1, Math.floor(points.length / 6));
+  const vlines = [];
   const labels = [];
-  for (let i = 0; i < points.length; i += 1) {
-    if (i % labelStep !== 0 && i !== points.length - 1) continue;
-    labels.push('<text x="' + xAt(i + 1).toFixed(1) + '" y="' + (height - 10) + '" text-anchor="middle" class="tick">' + esc(fmtDate(points[i].week, false)) + "</text>");
+  for (let month = 1; month <= 11; month += 1) {
+    const iso = axisYear + "-" + String(month).padStart(2, "0") + "-01";
+    const x = xAt(iso);
+    vlines.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (height - padB).toFixed(1) + '" class="grid"/>');
+    const text = month === 1 ? "1/1" : months[month - 1];
+    const anchor = month === 1 ? "start" : "middle";
+    labels.push('<text x="' + x.toFixed(1) + '" y="' + (height - 10) + '" text-anchor="' + anchor + '" class="tick">' + text + "</text>");
   }
-  const endX = coords[coords.length - 1][0];
-  const endY = coords[coords.length - 1][1];
-  const endLabel = fmtMoney(values[values.length - 1]);
-  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Weekly cumulative realized P and L ending at ' + esc(endLabel) + '">'
+  const xEnd = xAt(end);
+  vlines.push('<line x1="' + xEnd.toFixed(1) + '" y1="' + padT + '" x2="' + xEnd.toFixed(1) + '" y2="' + (height - padB).toFixed(1) + '" class="grid"/>');
+  labels.push('<text x="' + xEnd.toFixed(1) + '" y="' + (height - 10) + '" text-anchor="end" class="tick">12/31</text>');
+  const zeroY = yAt(0);
+  let marker = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No closed round trips in this period</text>';
+  let endLabel = "—";
+  if (series.length) {
+    const coords = series.map((point) => [xAt(point.week), yAt(point.pnl)]);
+    const line = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
+    const area = coords[0][0].toFixed(1) + "," + zeroY.toFixed(1) + " " + line + " " + coords[coords.length - 1][0].toFixed(1) + "," + zeroY.toFixed(1);
+    const endX = coords[coords.length - 1][0];
+    const endY = coords[coords.length - 1][1];
+    endLabel = fmtMoney(series[series.length - 1].pnl);
+    marker = '<polygon points="' + area + '" fill="url(#eqFill)"/>'
+      + '<polyline points="' + line + '" class="eq-line"/>'
+      + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
+      + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>";
+  }
+  let aria = "Weekly cumulative realized P and L for " + axisYear + ", axis January 1 through December 31";
+  if (series.length) aria += ", ending at " + endLabel;
+  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(aria) + '">'
     + "<defs><linearGradient id=\"eqFill\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
     + '<stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>'
     + '<stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>'
     + "</linearGradient></defs>"
     + grid
+    + vlines.join("")
     + '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + zeroY.toFixed(1) + '" class="zero"/>'
-    + '<polygon points="' + area + '" fill="url(#eqFill)"/>'
-    + '<polyline points="' + line + '" class="eq-line"/>'
-    + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
-    + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>"
+    + marker
     + labels.join("")
+    + (gapText ? '<text x="' + (width - padR) + '" y="16" text-anchor="end" class="gap-label">' + esc(gapText) + "</text>" : "")
     + "</svg>";
 }
 
@@ -689,106 +723,27 @@ function navInWindow(points, start, end) {
 function navSummary(points, goal) {
   const target = Number(goal || 1000000);
   if (!points.length) {
-    return { latest: null, pct: null, gap: null, placeholder: false, hkd: false, goal: target };
+    return { latest: null, pct: null, gap: null, gap_pct: null, placeholder: false, hkd: false, goal: target };
   }
   const latest = Number(points[points.length - 1].nav);
   return {
     latest: latest,
     pct: target ? (100 * latest) / target : null,
     gap: target - latest,
+    gap_pct: target ? (100 * (target - latest)) / target : null,
     placeholder: points.some((row) => row.source === "placeholder"),
     hkd: points.some((row) => String(row.currency || "").toUpperCase() === "HKD"),
     goal: target,
   };
 }
 
-function poolSvg(points, goal) {
-  const target = Number(goal || 1000000);
-  if (!points.length) {
-    return '<p class="empty">No NAV points in this period. The $1,000,000 goal is unchanged.</p>';
-  }
-  const navs = points.map((point) => Number(point.nav));
-  const peak = Math.max(target, Math.max.apply(null, navs));
-  const ymax = peak * 1.06;
-  const ymin = 0;
-  const width = 960;
-  const height = 300;
-  const padL = 112;
-  const padR = 24;
-  const padT = 28;
-  const padB = 36;
-  const innerW = width - padL - padR;
-  const innerH = height - padT - padB;
-  function yAt(value) {
-    return padT + innerH * (1 - (value - ymin) / (ymax - ymin));
-  }
-  function xAt(index) {
-    if (points.length === 1) return padL + innerW / 2;
-    return padL + (innerW * index) / (points.length - 1);
-  }
-  const coords = navs.map((nav, index) => [xAt(index), yAt(nav)]);
-  const baseline = yAt(0);
-  const surface = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
-  const water = coords[0][0].toFixed(1) + "," + baseline.toFixed(1) + " " + surface + " " + coords[coords.length - 1][0].toFixed(1) + "," + baseline.toFixed(1);
-  const goalY = yAt(target);
-  const ticks = [0, 250000, 500000, 750000, 1000000].filter((mark) => mark >= ymin - 1 && mark <= ymax + 1).map((mark) => {
-    const y = yAt(mark);
-    return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + y.toFixed(1) + '" class="grid"/>'
-      + '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="tick">' + esc(fmtPlainMoney(mark)) + "</text>";
-  }).join("");
-  const labelStep = Math.max(1, Math.floor(points.length / 6));
-  const labels = [];
-  for (let i = 0; i < points.length; i += 1) {
-    if (i % labelStep !== 0 && i !== points.length - 1) continue;
-    labels.push('<text x="' + xAt(i).toFixed(1) + '" y="' + (height - 10) + '" text-anchor="middle" class="tick">' + esc(fmtDate(points[i].date, false)) + "</text>");
-  }
-  const endX = coords[coords.length - 1][0];
-  const endY = coords[coords.length - 1][1];
-  const latest = navs[navs.length - 1];
-  const pct = target ? (100 * latest) / target : 0;
-  const endLabel = fmtPlainMoney(latest) + " · " + fmtPct(pct, 1, false);
-  const tankH = yAt(0) - goalY;
-  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="USD NAV path ending at ' + esc(endLabel) + ' of the $1,000,000 goal">'
-    + '<defs><linearGradient id="poolFill" x1="0" y1="0" x2="0" y2="1">'
-    + '<stop offset="0%" stop-color="#00f0ff" stop-opacity="0.62"/>'
-    + '<stop offset="100%" stop-color="#00f0ff" stop-opacity="0.14"/>'
-    + "</linearGradient></defs>"
-    + ticks
-    + '<rect x="' + padL + '" y="' + goalY.toFixed(1) + '" width="' + innerW.toFixed(1) + '" height="' + tankH.toFixed(1) + '" class="pool-tank"/>'
-    + '<polygon points="' + water + '" fill="url(#poolFill)"/>'
-    + '<line x1="' + padL + '" y1="' + goalY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + goalY.toFixed(1) + '" class="pool-goal"/>'
-    + '<text x="' + (width - padR - 8) + '" y="' + Math.max(16, goalY - 8).toFixed(1) + '" text-anchor="end" class="pool-goal-label">$1,000,000 goal</text>'
-    + '<polyline points="' + surface + '" class="pool-line"/>'
-    + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
-    + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>"
-    + labels.join("")
-    + "</svg>";
-}
-
-function paintPool(payload, bounds) {
-  const chart = document.getElementById("pool-chart");
-  if (!chart || !payload) return;
-  const goal = Number(payload.navGoal || 1000000);
-  const points = navInWindow(payload.nav || [], bounds && bounds.start, bounds && bounds.end);
-  const summary = navSummary(points, goal);
-  const flag = document.getElementById("pool-flag");
-  const nav = document.getElementById("pool-nav");
-  const pct = document.getElementById("pool-pct");
-  const gap = document.getElementById("pool-gap");
-  const note = document.getElementById("pool-note");
-  if (flag) {
-    flag.textContent = summary.placeholder
-      ? "Placeholder series — not account NAV. Replace data/nav_history.csv."
-      : "";
-  }
-  if (nav) nav.textContent = summary.latest == null ? "—" : fmtPlainMoney(summary.latest);
-  if (pct) pct.textContent = summary.pct == null ? "—" : fmtPct(summary.pct, 1, false);
-  if (gap) gap.textContent = summary.gap == null ? "—" : fmtPlainMoney(summary.gap);
-  if (note) {
-    const currency = summary.hkd ? "USD converted from HKD at fx_to_usd." : "USD.";
-    note.textContent = currency + " Last point in the selected period. Gap is $1,000,000 − NAV. Not included in Net P&L.";
-  }
-  chart.innerHTML = poolSvg(points, goal);
+function gapCaption(summary) {
+  if (!summary || summary.gap_pct == null) return "No NAV in this period";
+  const pct = summary.gap_pct < 0 ? fmtPct(summary.gap_pct, 1, true) : fmtPct(summary.gap_pct, 1, false);
+  let text = pct + " gap to $1,000,000 USD";
+  if (summary.placeholder) text += " · placeholder";
+  if (summary.hkd) text += " · from HKD";
+  return text;
 }
 
 function winPhrase(rate) {
@@ -796,7 +751,7 @@ function winPhrase(rate) {
   return formatFixed(rate, 0) + "% win";
 }
 
-function paint(view) {
+function paint(view, gapText, year) {
   const net = document.getElementById("kpi-net");
   net.textContent = fmtMoney(view.net);
   net.className = "v " + moneyClass(view.net);
@@ -829,8 +784,11 @@ function paint(view) {
   if (view.drawdown.trough && view.drawdown.dollars > 0) {
     trough = " Max drawdown trough " + fmtDate(view.drawdown.trough) + ".";
   }
-  note.textContent = "Realized round trips whose exit falls in the selected period, summed through each Friday." + trough;
-  document.getElementById("equity-chart").innerHTML = equitySvg(view.weekly);
+  const axisYear = Number(year) || new Date().getUTCFullYear();
+  note.textContent = "Realized round trips whose exit falls in the selected period, summed through each Friday." + trough + " The horizontal axis is " + axisYear + ", January 1 through December 31. The gap percent is NAV versus the goal, not this curve.";
+  document.getElementById("equity-chart").innerHTML = equitySvg(view.weekly, gapText, axisYear);
+  const gap = document.getElementById("equity-gap");
+  if (gap && gapText) gap.textContent = gapText;
 
   const focusPnl = document.getElementById("focus-pnl");
   focusPnl.textContent = fmtMoney(view.focus.pnl);
@@ -941,8 +899,8 @@ function boot() {
     const bounds = boundsFor(name);
     if (name !== "custom") reflect(bounds);
     const view = auditCompute(payload, bounds.start, bounds.end);
-    paint(view);
-    paintPool(payload, bounds);
+    const gapPoints = navInWindow(payload.nav || [], bounds.start, bounds.end);
+    paint(view, gapCaption(navSummary(gapPoints, payload.navGoal)), payload.chartYear);
     status.textContent = windowLine(bounds, view.round_trips, payload);
   }
 
@@ -958,7 +916,8 @@ function boot() {
 globalThis.divergingHtml = divergingHtml;
 globalThis.navInWindow = navInWindow;
 globalThis.navSummary = navSummary;
-globalThis.poolSvg = poolSvg;
+globalThis.gapCaption = gapCaption;
+globalThis.equitySvg = equitySvg;
 globalThis.auditCompute = auditCompute;
 globalThis.auditPresetBounds = auditPresetBounds;
 globalThis.auditFormat = {

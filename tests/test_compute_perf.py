@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -258,9 +257,9 @@ class SampleTests(unittest.TestCase):
             "MTD",
             "Last 30 days",
             "Full CSV range",
-            "Swimming pool",
-            "Placeholder series",
-            "$1,000,000 goal",
+            "66.0% gap to $1,000,000 USD",
+            ">1/1<",
+            ">12/31<",
             "Yahoo Finance",
             "Same day",
             "Overnight",
@@ -635,6 +634,7 @@ class PoolTests(unittest.TestCase):
         self.assertAlmostEqual(summary["latest"], 340000)
         self.assertAlmostEqual(summary["pct"], 34.0)
         self.assertAlmostEqual(summary["gap"], 660000)
+        self.assertAlmostEqual(summary["gap_pct"], 66.0)
         self.assertTrue(summary["placeholder"])
         self.assertFalse(summary["hkd"])
         week = cp.nav_in_window(points, *cp.preset_bounds("week", date(2026, 10, 12)))
@@ -643,13 +643,37 @@ class PoolTests(unittest.TestCase):
         self.assertEqual([point["date"] for point in month], [date(2026, 10, 9)])
         trail = cp.nav_in_window(points, *cp.preset_bounds("d30", date(2026, 10, 12)))
         self.assertEqual([point["date"] for point in trail], [date(2026, 9, 25), date(2026, 10, 9)])
-        html = cp.pool_section(points)
-        self.assertIn('id="pool-nav">$340,000', html)
-        self.assertIn('id="pool-pct">34.0%', html)
-        self.assertIn('id="pool-gap">$660,000', html)
-        self.assertIn("Not included in Net P&amp;L", html)
-        self.assertIn("$1,000,000 goal", html)
-        self.assertNotIn("SAMPLE", html)
+        label = cp.gap_caption(summary)
+        self.assertEqual(label, "66.0% gap to $1,000,000 USD · placeholder")
+        chart = cp.equity_svg([{"week": date(2026, 10, 9), "pnl": 3865.05}], label, year=2026)
+        self.assertIn("66.0% gap to $1,000,000 USD · placeholder", chart)
+        self.assertIn(">1/1<", chart)
+        self.assertIn(">12/31<", chart)
+        self.assertIn("January 1 through December 31", chart)
+        self.assertNotIn("Swimming pool", chart)
+        self.assertNotIn("SAMPLE", chart)
+        span = (date(2026, 12, 31) - date(2026, 1, 1)).days
+        inner = 960 - 88 - 24
+        x_oct = 88 + inner * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
+        x_jul = 88 + inner * (date(2026, 7, 3) - date(2026, 1, 1)).days / span
+        self.assertIn(f'cx="{x_oct:.1f}"', chart)
+        self.assertLess(x_oct, 88 + inner * 0.9)
+        wide = cp.equity_svg(
+            [
+                {"week": date(2026, 7, 3), "pnl": 1000},
+                {"week": date(2026, 10, 9), "pnl": 3865.05},
+            ],
+            label,
+            year=2026,
+        )
+        self.assertIn(f"{x_jul:.1f},", wide)
+        self.assertIn(f"{x_oct:.1f},", wide)
+        self.assertLess(x_jul + 40, x_oct)
+        empty = cp.equity_svg([], label, year=2026)
+        self.assertIn(">1/1<", empty)
+        self.assertIn(">12/31<", empty)
+        self.assertIn("No closed round trips in this period", empty)
+        self.assertEqual(cp.chart_year([{"week": date(2026, 10, 9)}], [{"date": date(2026, 7, 3)}]), 2026)
 
     def test_hkd_converts_and_bad_rows_drop(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -668,9 +692,10 @@ class PoolTests(unittest.TestCase):
         summary = cp.nav_summary(points)
         self.assertAlmostEqual(summary["pct"], 10.24)
         self.assertAlmostEqual(summary["gap"], 897600)
+        self.assertAlmostEqual(summary["gap_pct"], 89.76)
         self.assertTrue(summary["hkd"])
         self.assertFalse(summary["placeholder"])
-        self.assertIn("USD converted from HKD", cp.pool_section(points))
+        self.assertEqual(cp.gap_caption(summary), "89.8% gap to $1,000,000 USD · from HKD")
 
     def test_js_pool_matches_python(self):
         points = cp.load_nav(ROOT / "data" / "nav_history.csv")
@@ -690,21 +715,27 @@ class PoolTests(unittest.TestCase):
             + "\nconst rows = "
             + json.dumps(payload)
             + ";\nconst week = navInWindow(rows, '2026-10-12', '2026-10-12');\n"
-            + "process.stdout.write(JSON.stringify({all: navSummary(rows, 1000000), week: navSummary(week, 1000000), mtd: navSummary(navInWindow(rows, '2026-10-01', '2026-10-12'), 1000000), svg: poolSvg(rows, 1000000)}));"
+            + "const chart = equitySvg([{week: '2026-10-09', pnl: 3865.05}], '66.0% gap to $1,000,000 USD · placeholder', 2026);\n"
+            + "process.stdout.write(JSON.stringify({all: navSummary(rows, 1000000), week: gapCaption(navSummary(week, 1000000)), mtd: gapCaption(navSummary(navInWindow(rows, '2026-10-01', '2026-10-12'), 1000000)), chart: chart}));"
         )
         proc = subprocess.run(["node", "-e", runner], capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         got = json.loads(proc.stdout)
         summary = cp.nav_summary(points)
         self.assertAlmostEqual(got["all"]["latest"], summary["latest"])
-        self.assertAlmostEqual(got["all"]["pct"], summary["pct"])
-        self.assertAlmostEqual(got["all"]["gap"], summary["gap"])
+        self.assertAlmostEqual(got["all"]["gap_pct"], summary["gap_pct"])
         self.assertTrue(got["all"]["placeholder"])
-        self.assertIsNone(got["week"]["latest"])
-        self.assertEqual(got["mtd"]["latest"], 340000)
-        squash = lambda text: re.sub(r">\s+<", "><", text)
-        self.assertEqual(squash(got["svg"]), squash(cp.pool_svg(points)))
-        self.assertIsNone(cp.nav_summary([])["latest"])
+        self.assertEqual(got["week"], "No NAV in this period")
+        self.assertEqual(got["mtd"], cp.gap_caption(cp.nav_summary(cp.nav_in_window(points, date(2026, 10, 1), date(2026, 10, 12)))))
+        self.assertIsNone(cp.nav_summary([])["gap_pct"])
+        py_chart = cp.equity_svg([{"week": date(2026, 10, 9), "pnl": 3865.05}], "66.0% gap to $1,000,000 USD · placeholder", year=2026)
+        span = (date(2026, 12, 31) - date(2026, 1, 1)).days
+        x_oct = 88 + (960 - 88 - 24) * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
+        marker = f'cx="{x_oct:.1f}"'
+        self.assertIn(marker, py_chart)
+        self.assertIn(marker, got["chart"])
+        self.assertIn(">1/1<", got["chart"])
+        self.assertIn(">12/31<", got["chart"])
 
 
 def math_isinf(value) -> bool:
