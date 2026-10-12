@@ -1533,37 +1533,100 @@ def chart_year(points: list[dict] | None = None, nav: list[dict] | None = None, 
     return date.today().year
 
 
-def equity_svg(points: list[dict], gap_text: str | None = None, year: int | None = None) -> str:
-    """Realized equity on a fixed Jan 1–Dec 31 axis. Points keep their dates."""
-    axis_year = int(year) if year else chart_year(points)
+def weekly_bars(points: list[dict]) -> str:
+    """Bar chart of realized P&L by exit week. Not NAV, and not the $1M gap."""
+    rows: list[tuple[date, float]] = []
+    for point in points or []:
+        day = _as_date(point.get("week"))
+        if day is None:
+            continue
+        raw = point["week_pnl"] if point.get("week_pnl") is not None else point.get("pnl")
+        pnl = float(raw or 0.0)
+        if abs(pnl) <= 1e-9:
+            continue
+        rows.append((day, pnl))
+    rows.sort(key=lambda item: item[0])
+    width, height = 960, 280
+    pad_l, pad_r, pad_t, pad_b = 88, 24, 28, 40
+    inner_w = width - pad_l - pad_r
+    inner_h = height - pad_t - pad_b
+    values = [pnl for _, pnl in rows] or [0.0]
+    ymin = min(0.0, min(values))
+    ymax = max(0.0, max(values))
+    span = ymax - ymin or 1.0
+    ymin -= span * 0.12
+    ymax += span * 0.22
+
+    def y_at(v: float) -> float:
+        return pad_t + inner_h * (1 - (v - ymin) / (ymax - ymin))
+
+    grid = []
+    for tick in _ticks(ymin, ymax):
+        y = y_at(tick)
+        grid.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" class="grid"/>'
+            f'<text x="{pad_l - 8}" y="{y + 4:.1f}" text-anchor="end" class="tick">{esc(fmt_plain_money(tick))}</text>'
+        )
+    zero_y = y_at(0.0)
+    bars = []
+    if rows:
+        slot = inner_w / len(rows)
+        bar_w = min(56.0, slot * 0.62)
+        step = max(1, len(rows) // 8)
+        for i, (day, pnl) in enumerate(rows):
+            center = pad_l + slot * (i + 0.5)
+            y1 = y_at(pnl)
+            top = min(zero_y, y1)
+            bar_h = max(2.0, abs(y1 - zero_y))
+            tone = "up" if pnl >= 0 else "dn"
+            bars.append(
+                f'<rect x="{center - bar_w / 2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{bar_h:.1f}" class="wk-{tone}"/>'
+            )
+            label_y = y1 - 8 if pnl >= 0 else y1 + 14
+            bars.append(
+                f'<text x="{center:.1f}" y="{label_y:.1f}" text-anchor="middle" class="bar-amt {tone}">{esc(fmt_money(pnl))}</text>'
+            )
+            if i % step == 0 or i == len(rows) - 1:
+                bars.append(
+                    f'<text x="{center:.1f}" y="{height - 12}" text-anchor="middle" class="tick">{esc(fmt_date(day, with_year=False))}</text>'
+                )
+    else:
+        bars.append(
+            f'<text x="{(pad_l + inner_w / 2):.1f}" y="{((pad_t + height - pad_b) / 2):.1f}" '
+            f'text-anchor="middle" class="tick">No closed round trips in this period</text>'
+        )
+    aria = "Weekly realized P and L"
+    return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="{aria}">
+      {''.join(grid)}
+      <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{width - pad_r}" y2="{zero_y:.1f}" class="zero"/>
+      {''.join(bars)}
+    </svg>'''
+
+
+def nav_svg(points: list[dict], gap_text: str | None = None, year: int | None = None, goal: float = NAV_GOAL) -> str:
+    """NAV line on a fixed Jan 1–Dec 31 axis, with the percent gap to $1,000,000."""
+    axis_year = int(year) if year else chart_year(nav=points)
     start = date(axis_year, 1, 1)
     end = date(axis_year, 12, 31)
     span_days = (end - start).days or 1
     width, height = 960, 320
-    pad_l, pad_r, pad_t, pad_b = 88, 24, 22, 36
+    pad_l, pad_r, pad_t, pad_b = 88, 24, 28, 36
     inner_w = width - pad_l - pad_r
     inner_h = height - pad_t - pad_b
-    dated = []
+    dated: list[tuple[date, float]] = []
     for point in points or []:
-        day = _as_date(point.get("week"))
+        day = _as_date(point.get("date"))
         if day is None or day.year != axis_year:
             continue
-        dated.append((day, float(point["pnl"])))
+        dated.append((day, float(point["nav"])))
     dated.sort(key=lambda item: item[0])
-    series: list[tuple[date, float]] = []
-    if dated:
-        anchor = dated[0][0] - timedelta(days=7)
-        if anchor < start:
-            anchor = start
-        if dated[0][1] != 0.0:
-            series.append((anchor, 0.0))
-        series.extend(dated)
-    values = [pnl for _, pnl in series] or [0.0]
-    ymin = min(0.0, min(values))
-    ymax = max(0.0, max(values))
+    goal_v = float(goal)
+    observed = [nav for _, nav in dated]
+    ymin = min([0.0, goal_v] + observed)
+    ymax = max([0.0, goal_v] + observed)
     span = ymax - ymin or 1.0
-    ymin -= span * 0.08
-    ymax += span * 0.12
+    ymin -= span * 0.04
+    ymax += span * 0.08
 
     def x_at(day: date) -> float:
         clamped = min(max(day, start), end)
@@ -1586,53 +1649,44 @@ def equity_svg(points: list[dict], gap_text: str | None = None, year: int | None
         day = date(axis_year, month, 1)
         x = x_at(day)
         vlines.append(f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
-        if month == 1:
-            text, anchor = "1/1", "start"
-        else:
-            text, anchor = months[month - 1], "middle"
+        text, anchor = ("1/1", "start") if month == 1 else (months[month - 1], "middle")
         labels.append(f'<text x="{x:.1f}" y="{height - 10}" text-anchor="{anchor}" class="tick">{text}</text>')
     x_end = x_at(end)
     vlines.append(f'<line x1="{x_end:.1f}" y1="{pad_t}" x2="{x_end:.1f}" y2="{height - pad_b:.1f}" class="grid"/>')
     labels.append(f'<text x="{x_end:.1f}" y="{height - 10}" text-anchor="end" class="tick">12/31</text>')
-    zero_y = y_at(0.0)
-    line = ""
-    area = ""
-    marker = ""
-    if series:
-        coords = [(x_at(day), y_at(pnl)) for day, pnl in series]
+    goal_y = y_at(goal_v)
+    goal_line = (
+        f'<line x1="{pad_l}" y1="{goal_y:.1f}" x2="{width - pad_r}" y2="{goal_y:.1f}" class="nav-goal"/>'
+        f'<text x="{pad_l + 8}" y="{max(pad_t + 12, goal_y - 6):.1f}" class="nav-goal-label">$1,000,000</text>'
+    )
+    if dated:
+        coords = [(x_at(day), y_at(nav)) for day, nav in dated]
         line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-        area = f"{coords[0][0]:.1f},{zero_y:.1f} " + line + f" {coords[-1][0]:.1f},{zero_y:.1f}"
+        dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" class="nav-dot"/>' for x, y in coords)
         end_x, end_y = coords[-1]
-        end_label = fmt_money(series[-1][1])
-        marker = (
-            f'<polygon points="{area}" fill="url(#eqFill)"/>'
-            f'<polyline points="{line}" class="eq-line"/>'
-            f'<circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4.5" class="eq-dot"/>'
-            f'<text x="{end_x - 8:.1f}" y="{max(16, end_y - 10):.1f}" text-anchor="end" class="end-label">{esc(end_label)}</text>'
+        end_label = fmt_plain_money(dated[-1][1])
+        series = (
+            f'<polyline points="{line}" class="nav-line"/>'
+            f"{dots}"
+            f'<text x="{end_x + 8:.1f}" y="{max(16, end_y - 8):.1f}" class="nav-end">{esc(end_label)}</text>'
         )
+        aria = f"NAV for {axis_year}, axis January 1 through December 31, ending at {end_label}"
     else:
-        end_label = "—"
-        marker = (
+        series = (
             f'<text x="{(pad_l + inner_w / 2):.1f}" y="{((pad_t + height - pad_b) / 2):.1f}" '
-            f'text-anchor="middle" class="tick">No closed round trips in this period</text>'
+            f'text-anchor="middle" class="tick">No NAV in this period</text>'
         )
-    aria = f"Weekly cumulative realized P and L for {axis_year}, axis January 1 through December 31"
-    if series:
-        aria += f", ending at {end_label}"
-    gap = f'<text x="{width - pad_r}" y="16" text-anchor="end" class="gap-label">{esc(gap_text)}</text>' if gap_text else ""
+        aria = f"NAV for {axis_year}, axis January 1 through December 31"
+    corner = ""
+    if gap_text and gap_text != "No NAV in this period":
+        corner = f'<text x="{width - pad_r}" y="18" text-anchor="end" class="gap-label">{esc(gap_text)}</text>'
     return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(aria)}">
-      <defs>
-        <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>
-          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>
-        </linearGradient>
-      </defs>
       {''.join(grid)}
       {''.join(vlines)}
-      <line x1="{pad_l}" y1="{zero_y:.1f}" x2="{width - pad_r}" y2="{zero_y:.1f}" class="zero"/>
-      {marker}
+      {goal_line}
+      {series}
       {''.join(labels)}
-      {gap}
+      {corner}
     </svg>'''
 
 
@@ -2133,6 +2187,16 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
   letter-spacing: 0.03em;
 }
 .gap-label { fill: var(--yellow); font-size: 14px; font-family: var(--mono); }
+.wk-up { fill: var(--green-bar); }
+.wk-dn { fill: var(--red-bar); }
+.bar-amt { font-size: 12px; font-family: var(--mono); font-weight: 700; }
+.bar-amt.up { fill: var(--green); }
+.bar-amt.dn { fill: var(--red); }
+.nav-line { fill: none; stroke: var(--cyan); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.nav-dot { fill: var(--cyan); }
+.nav-goal { stroke: var(--yellow); stroke-width: 1.25; stroke-dasharray: 5 4; }
+.nav-goal-label { fill: var(--yellow); font-size: 12px; font-family: var(--mono); }
+.nav-end { fill: var(--cyan); font-size: 13px; font-weight: 700; font-family: var(--display); }
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2334,11 +2398,17 @@ def render_html(audit: dict) -> str:
       <article class="kpi"><p class="k">Max Drawdown</p><p class="v neg" id="kpi-dd">{dd_txt}</p><p class="s" id="kpi-dd-sub">{esc(dd_sub)}</p></article>
     </section>
     <section class="card">
-      <p class="section-k">Equity curve</p>
-      <h2>Weekly cumulative P&amp;L</h2>
-      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)} The horizontal axis is {axis_year}, January 1 through December 31. The gap percent is NAV versus the goal, not this curve.</p>
+      <p class="section-k">Weekly P&amp;L</p>
+      <h2>Realized by week</h2>
+      <p class="note" id="equity-note">Closed round trips whose exit falls in the selected period, summed through each Friday.{esc(trough)}</p>
+      <div id="equity-chart">{weekly_bars(audit["weekly"])}</div>
+    </section>
+    <section class="card">
+      <p class="section-k">NAV</p>
+      <h2>$1,000,000 USD</h2>
+      <p class="note" id="nav-note">Net asset value in USD. The horizontal axis is {axis_year}, January 1 through December 31. The gap percent is not added to Net P&amp;L.</p>
       <p class="equity-gap" id="equity-gap">{esc(gap_text)}</p>
-      <div id="equity-chart">{equity_svg(audit["weekly"], gap_text, year=axis_year)}</div>
+      <div id="nav-chart">{nav_svg(audit.get("nav") or [], gap_text, year=axis_year, goal=audit.get("nav_goal") or NAV_GOAL)}</div>
     </section>
     <section class="pair">
       <article class="card focus">

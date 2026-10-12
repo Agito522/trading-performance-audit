@@ -620,37 +620,87 @@ function ticks(ymin, ymax) {
   return out;
 }
 
-function equitySvg(points, gapText, year) {
-  const dated = (points || []).filter((point) => point && point.week).map((point) => ({
-    week: String(point.week).slice(0, 10),
-    pnl: Number(point.pnl),
-  })).sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
-  const axisYear = Number(year) || (dated.length ? Number(dated[dated.length - 1].week.slice(0, 4)) : new Date().getUTCFullYear());
-  const start = axisYear + "-01-01";
+function weeklyBars(points) {
+  const rows = (points || []).map((point) => {
+    const raw = point.week_pnl != null ? point.week_pnl : point.pnl;
+    return { week: String(point.week).slice(0, 10), pnl: Number(raw || 0) };
+  }).filter((point) => point.week && Math.abs(point.pnl) > 1e-9)
+    .sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
+  const width = 960;
+  const height = 280;
+  const padL = 88;
+  const padR = 24;
+  const padT = 28;
+  const padB = 40;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  const values = rows.length ? rows.map((point) => point.pnl) : [0];
+  let ymin = Math.min.apply(null, [0].concat(values));
+  let ymax = Math.max.apply(null, [0].concat(values));
+  const span = ymax - ymin || 1;
+  ymin -= span * 0.12;
+  ymax += span * 0.22;
+  function yAt(v) {
+    return padT + innerH * (1 - (v - ymin) / (ymax - ymin));
+  }
+  const grid = ticks(ymin, ymax).map((tick) => {
+    const y = yAt(tick);
+    return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + y.toFixed(1) + '" class="grid"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="tick">' + esc(fmtPlainMoney(tick)) + "</text>";
+  }).join("");
+  const zeroY = yAt(0);
+  let bars = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No closed round trips in this period</text>';
+  if (rows.length) {
+    const slot = innerW / rows.length;
+    const barW = Math.min(56, slot * 0.62);
+    const step = Math.max(1, Math.floor(rows.length / 8));
+    const parts = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const center = padL + slot * (i + 0.5);
+      const y1 = yAt(rows[i].pnl);
+      const top = Math.min(zeroY, y1);
+      const barH = Math.max(2, Math.abs(y1 - zeroY));
+      const tone = rows[i].pnl >= 0 ? "up" : "dn";
+      parts.push('<rect x="' + (center - barW / 2).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" class="wk-' + tone + '"/>');
+      const labelY = rows[i].pnl >= 0 ? y1 - 8 : y1 + 14;
+      parts.push('<text x="' + center.toFixed(1) + '" y="' + labelY.toFixed(1) + '" text-anchor="middle" class="bar-amt ' + tone + '">' + esc(fmtMoney(rows[i].pnl)) + "</text>");
+      if (i % step === 0 || i === rows.length - 1) {
+        parts.push('<text x="' + center.toFixed(1) + '" y="' + (height - 12) + '" text-anchor="middle" class="tick">' + esc(fmtDate(rows[i].week, false)) + "</text>");
+      }
+    }
+    bars = parts.join("");
+  }
+  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Weekly realized P and L">'
+    + grid
+    + '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + zeroY.toFixed(1) + '" class="zero"/>'
+    + bars
+    + "</svg>";
+}
+
+function navSvg(points, gapText, year, goal) {
+  const dated = (points || []).filter((point) => point && point.date).map((point) => ({
+    date: String(point.date).slice(0, 10),
+    nav: Number(point.nav),
+  })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const axisYear = Number(year) || (dated.length ? Number(dated[dated.length - 1].date.slice(0, 4)) : new Date().getUTCFullYear());
   const end = axisYear + "-12-31";
   const spanDays = Math.round((Date.UTC(axisYear, 11, 31) - Date.UTC(axisYear, 0, 1)) / 86400000) || 1;
   const width = 960;
   const height = 320;
   const padL = 88;
   const padR = 24;
-  const padT = 22;
+  const padT = 28;
   const padB = 36;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
-  const inYear = dated.filter((point) => Number(point.week.slice(0, 4)) === axisYear);
-  const series = [];
-  if (inYear.length) {
-    let anchor = addDays(inYear[0].week, -7);
-    if (anchor < start) anchor = start;
-    if (inYear[0].pnl !== 0) series.push({ week: anchor, pnl: 0 });
-    inYear.forEach((point) => series.push(point));
-  }
-  const values = series.length ? series.map((point) => point.pnl) : [0];
-  let ymin = Math.min.apply(null, [0].concat(values));
-  let ymax = Math.max.apply(null, [0].concat(values));
+  const inYear = dated.filter((point) => Number(point.date.slice(0, 4)) === axisYear);
+  const goalV = Number(goal || 1000000);
+  const observed = inYear.map((point) => point.nav);
+  let ymin = Math.min.apply(null, [0, goalV].concat(observed));
+  let ymax = Math.max.apply(null, [0, goalV].concat(observed));
   const span = ymax - ymin || 1;
-  ymin -= span * 0.08;
-  ymax += span * 0.12;
+  ymin -= span * 0.04;
+  ymax += span * 0.08;
   function dayIndex(iso) {
     const parts = String(iso).slice(0, 10).split("-").map(Number);
     const clamped = Math.min(Math.max(Date.UTC(parts[0], parts[1] - 1, parts[2]), Date.UTC(axisYear, 0, 1)), Date.UTC(axisYear, 11, 31));
@@ -681,34 +731,32 @@ function equitySvg(points, gapText, year) {
   const xEnd = xAt(end);
   vlines.push('<line x1="' + xEnd.toFixed(1) + '" y1="' + padT + '" x2="' + xEnd.toFixed(1) + '" y2="' + (height - padB).toFixed(1) + '" class="grid"/>');
   labels.push('<text x="' + xEnd.toFixed(1) + '" y="' + (height - 10) + '" text-anchor="end" class="tick">12/31</text>');
-  const zeroY = yAt(0);
-  let marker = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No closed round trips in this period</text>';
-  let endLabel = "—";
-  if (series.length) {
-    const coords = series.map((point) => [xAt(point.week), yAt(point.pnl)]);
+  const goalY = yAt(goalV);
+  const goalLine = '<line x1="' + padL + '" y1="' + goalY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + goalY.toFixed(1) + '" class="nav-goal"/>'
+    + '<text x="' + (padL + 8) + '" y="' + Math.max(padT + 12, goalY - 6).toFixed(1) + '" class="nav-goal-label">$1,000,000</text>';
+  let series = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No NAV in this period</text>';
+  let aria = "NAV for " + axisYear + ", axis January 1 through December 31";
+  if (inYear.length) {
+    const coords = inYear.map((point) => [xAt(point.date), yAt(point.nav)]);
     const line = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
-    const area = coords[0][0].toFixed(1) + "," + zeroY.toFixed(1) + " " + line + " " + coords[coords.length - 1][0].toFixed(1) + "," + zeroY.toFixed(1);
+    const dots = coords.map((pair) => '<circle cx="' + pair[0].toFixed(1) + '" cy="' + pair[1].toFixed(1) + '" r="4" class="nav-dot"/>').join("");
     const endX = coords[coords.length - 1][0];
     const endY = coords[coords.length - 1][1];
-    endLabel = fmtMoney(series[series.length - 1].pnl);
-    marker = '<polygon points="' + area + '" fill="url(#eqFill)"/>'
-      + '<polyline points="' + line + '" class="eq-line"/>'
-      + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
-      + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>";
+    const endLabel = fmtPlainMoney(inYear[inYear.length - 1].nav);
+    series = '<polyline points="' + line + '" class="nav-line"/>' + dots
+      + '<text x="' + (endX + 8).toFixed(1) + '" y="' + Math.max(16, endY - 8).toFixed(1) + '" class="nav-end">' + esc(endLabel) + "</text>";
+    aria += ", ending at " + endLabel;
   }
-  let aria = "Weekly cumulative realized P and L for " + axisYear + ", axis January 1 through December 31";
-  if (series.length) aria += ", ending at " + endLabel;
+  const corner = gapText && gapText !== "No NAV in this period"
+    ? '<text x="' + (width - padR) + '" y="18" text-anchor="end" class="gap-label">' + esc(gapText) + "</text>"
+    : "";
   return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(aria) + '">'
-    + "<defs><linearGradient id=\"eqFill\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
-    + '<stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>'
-    + '<stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>'
-    + "</linearGradient></defs>"
     + grid
     + vlines.join("")
-    + '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + zeroY.toFixed(1) + '" class="zero"/>'
-    + marker
+    + goalLine
+    + series
     + labels.join("")
-    + (gapText ? '<text x="' + (width - padR) + '" y="16" text-anchor="end" class="gap-label">' + esc(gapText) + "</text>" : "")
+    + corner
     + "</svg>";
 }
 
@@ -751,7 +799,7 @@ function winPhrase(rate) {
   return formatFixed(rate, 0) + "% win";
 }
 
-function paint(view, gapText, year) {
+function paint(view, navPoints, year, goal) {
   const net = document.getElementById("kpi-net");
   net.textContent = fmtMoney(view.net);
   net.className = "v " + moneyClass(view.net);
@@ -785,8 +833,13 @@ function paint(view, gapText, year) {
     trough = " Max drawdown trough " + fmtDate(view.drawdown.trough) + ".";
   }
   const axisYear = Number(year) || new Date().getUTCFullYear();
-  note.textContent = "Realized round trips whose exit falls in the selected period, summed through each Friday." + trough + " The horizontal axis is " + axisYear + ", January 1 through December 31. The gap percent is NAV versus the goal, not this curve.";
-  document.getElementById("equity-chart").innerHTML = equitySvg(view.weekly, gapText, axisYear);
+  const gapText = gapCaption(navSummary(navPoints || [], goal));
+  note.textContent = "Closed round trips whose exit falls in the selected period, summed through each Friday." + trough;
+  document.getElementById("equity-chart").innerHTML = weeklyBars(view.weekly);
+  const navNote = document.getElementById("nav-note");
+  if (navNote) navNote.textContent = "Net asset value in USD. The horizontal axis is " + axisYear + ", January 1 through December 31. The gap percent is not added to Net P&L.";
+  const navChart = document.getElementById("nav-chart");
+  if (navChart) navChart.innerHTML = navSvg(navPoints || [], gapText, axisYear, goal);
   const gap = document.getElementById("equity-gap");
   if (gap && gapText) gap.textContent = gapText;
 
@@ -900,7 +953,7 @@ function boot() {
     if (name !== "custom") reflect(bounds);
     const view = auditCompute(payload, bounds.start, bounds.end);
     const gapPoints = navInWindow(payload.nav || [], bounds.start, bounds.end);
-    paint(view, gapCaption(navSummary(gapPoints, payload.navGoal)), payload.chartYear);
+    paint(view, gapPoints, payload.chartYear, payload.navGoal);
     status.textContent = windowLine(bounds, view.round_trips, payload);
   }
 
@@ -917,7 +970,8 @@ globalThis.divergingHtml = divergingHtml;
 globalThis.navInWindow = navInWindow;
 globalThis.navSummary = navSummary;
 globalThis.gapCaption = gapCaption;
-globalThis.equitySvg = equitySvg;
+globalThis.weeklyBars = weeklyBars;
+globalThis.navSvg = navSvg;
 globalThis.auditCompute = auditCompute;
 globalThis.auditPresetBounds = auditPresetBounds;
 globalThis.auditFormat = {

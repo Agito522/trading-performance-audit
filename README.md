@@ -16,7 +16,7 @@ On that run the script asks Yahoo Finance for the latest daily **close** of each
 
 Best 5 and Worst 5 print each ticker in the same bright yellow as the open book. Next to the bar, the label is realized dollars and that bar’s length as a percent of the longest bar in the same list, for example `+$2,007 / +100.0%`. Holding-period and entry charts stay dollar-only.
 
-The equity curve stays realized P&L. Its horizontal axis is one calendar year, January 1 through December 31, so a point stays on its date instead of the chart stretching to fit a short or sparse series. On that chart, the yellow label is the gap to a **$1,000,000 USD** NAV goal as a percent of the goal: `(1,000,000 − NAV) / 1,000,000`. NAV comes from `data/nav_history.csv`. USD amounts are used as USD. HKD amounts convert at that row’s `fx_to_usd`. The committed series is a placeholder until a real history replaces it. The period control uses the latest NAV date inside the window and does not change the year axis. The percent is not added to Net P&L.
+Weekly P&L is a bar chart of realized closes, summed through each Friday. It is not NAV. The NAV chart is a line of USD net asset value. Its horizontal axis is one calendar year, January 1 through December 31, so a point stays on its date. The yellow label is the gap to a **$1,000,000 USD** goal as a percent of the goal: `(1,000,000 − NAV) / 1,000,000`. A dashed line marks that goal. NAV comes from `data/nav_history.csv`. USD amounts are used as USD. HKD amounts convert at that row’s `fx_to_usd`. The committed series is a placeholder until a real history replaces it. The period control uses NAV dates inside the window and does not change the year axis. The percent is not added to Net P&L.
 
 The page opens on **Full CSV range**. The control under the title — This week, MTD, Last 30 days, Full CSV range, and Custom from–to — recomputes the audit in the browser from closed FIFO round trips whose **exit** falls in that window. Net P&L stays realized; open marks are not added. This week and MTD run through today in America/New_York. Last 30 days is the 30 calendar days ending today.
 
@@ -63,7 +63,7 @@ R buckets are `(−∞, −2]`, `(−2, −1]`, `(−1, 0]`, `(0, 1]`, `(1, 2]`,
 Fills alone (symbol, time, side, quantity, price, commission) are enough for:
 
 - Net P&L, round trips, win rate, profit factor, expectancy, max drawdown
-- Weekly equity curve
+- Weekly realized P&L bars
 - P&L by holding period (same day, overnight, 2–4 sessions, 5–9, 10+)
 - Entry time and day of week
 - Best 5 / worst 5 symbols

@@ -342,6 +342,16 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
   letter-spacing: 0.03em;
 }
 .gap-label { fill: var(--yellow); font-size: 14px; font-family: var(--mono); }
+.wk-up { fill: var(--green-bar); }
+.wk-dn { fill: var(--red-bar); }
+.bar-amt { font-size: 12px; font-family: var(--mono); font-weight: 700; }
+.bar-amt.up { fill: var(--green); }
+.bar-amt.dn { fill: var(--red); }
+.nav-line { fill: none; stroke: var(--cyan); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.nav-dot { fill: var(--cyan); }
+.nav-goal { stroke: var(--yellow); stroke-width: 1.25; stroke-dasharray: 5 4; }
+.nav-goal-label { fill: var(--yellow); font-size: 12px; font-family: var(--mono); }
+.nav-end { fill: var(--cyan); font-size: 13px; font-weight: 700; font-family: var(--display); }
 ::selection { background: var(--yellow); color: #0a0c10; }
 @media (max-width: 980px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -394,23 +404,27 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
       <article class="kpi"><p class="k">Max Drawdown</p><p class="v neg" id="kpi-dd">$0</p><p class="s" id="kpi-dd-sub">from peak</p></article>
     </section>
     <section class="card">
-      <p class="section-k">Equity curve</p>
-      <h2>Weekly cumulative P&amp;L</h2>
-      <p class="note" id="equity-note">Realized round trips whose exit falls in the selected period, summed through each Friday. The horizontal axis is 2026, January 1 through December 31. The gap percent is NAV versus the goal, not this curve.</p>
+      <p class="section-k">Weekly P&amp;L</p>
+      <h2>Realized by week</h2>
+      <p class="note" id="equity-note">Closed round trips whose exit falls in the selected period, summed through each Friday.</p>
+      <div id="equity-chart"><svg viewBox="0 0 960 280" role="img" aria-label="Weekly realized P and L">
+      <line x1="88" y1="221.0" x2="936" y2="221.0" class="grid"/><text x="80" y="225.0" text-anchor="end" class="tick">$0</text><line x1="88" y1="144.1" x2="936" y2="144.1" class="grid"/><text x="80" y="148.1" text-anchor="end" class="tick">$1,000</text><line x1="88" y1="67.1" x2="936" y2="67.1" class="grid"/><text x="80" y="71.1" text-anchor="end" class="tick">$2,000</text>
+      <line x1="88" y1="221.0" x2="936" y2="221.0" class="zero"/>
+      <rect x="201.3" y="62.8" width="56.0" height="158.2" class="wk-up"/><text x="229.3" y="54.8" text-anchor="middle" class="bar-amt up">+$2,056</text><text x="229.3" y="268" text-anchor="middle" class="tick">Oct 2</text><rect x="484.0" y="98.5" width="56.0" height="122.6" class="wk-up"/><text x="512.0" y="90.5" text-anchor="middle" class="bar-amt up">+$1,593</text><text x="512.0" y="268" text-anchor="middle" class="tick">Oct 9</text><rect x="766.7" y="204.4" width="56.0" height="16.6" class="wk-up"/><text x="794.7" y="196.4" text-anchor="middle" class="bar-amt up">+$216</text><text x="794.7" y="268" text-anchor="middle" class="tick">Oct 16</text>
+    </svg></div>
+    </section>
+    <section class="card">
+      <p class="section-k">NAV</p>
+      <h2>$1,000,000 USD</h2>
+      <p class="note" id="nav-note">Net asset value in USD. The horizontal axis is 2026, January 1 through December 31. The gap percent is not added to Net P&amp;L.</p>
       <p class="equity-gap" id="equity-gap">66.0% gap to $1,000,000 USD · placeholder</p>
-      <div id="equity-chart"><svg viewBox="0 0 960 320" role="img" aria-label="Weekly cumulative realized P and L for 2026, axis January 1 through December 31, ending at +$3,865">
-      <defs>
-        <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>
-          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>
-        </linearGradient>
-      </defs>
-      <line x1="88" y1="266.5" x2="936" y2="266.5" class="grid"/><text x="80" y="270.5" text-anchor="end" class="tick">$0</text><line x1="88" y1="210.0" x2="936" y2="210.0" class="grid"/><text x="80" y="214.0" text-anchor="end" class="tick">$1,000</text><line x1="88" y1="153.6" x2="936" y2="153.6" class="grid"/><text x="80" y="157.6" text-anchor="end" class="tick">$2,000</text><line x1="88" y1="97.1" x2="936" y2="97.1" class="grid"/><text x="80" y="101.1" text-anchor="end" class="tick">$3,000</text><line x1="88" y1="40.6" x2="936" y2="40.6" class="grid"/><text x="80" y="44.6" text-anchor="end" class="tick">$4,000</text>
-      <line x1="88.0" y1="22" x2="88.0" y2="284.0" class="grid"/><line x1="160.2" y1="22" x2="160.2" y2="284.0" class="grid"/><line x1="225.5" y1="22" x2="225.5" y2="284.0" class="grid"/><line x1="297.7" y1="22" x2="297.7" y2="284.0" class="grid"/><line x1="367.6" y1="22" x2="367.6" y2="284.0" class="grid"/><line x1="439.8" y1="22" x2="439.8" y2="284.0" class="grid"/><line x1="509.7" y1="22" x2="509.7" y2="284.0" class="grid"/><line x1="581.9" y1="22" x2="581.9" y2="284.0" class="grid"/><line x1="654.1" y1="22" x2="654.1" y2="284.0" class="grid"/><line x1="724.0" y1="22" x2="724.0" y2="284.0" class="grid"/><line x1="796.2" y1="22" x2="796.2" y2="284.0" class="grid"/><line x1="936.0" y1="22" x2="936.0" y2="284.0" class="grid"/>
-      <line x1="88" y1="266.5" x2="936" y2="266.5" class="zero"/>
-      <polygon points="710.0,266.5 710.0,266.5 726.3,150.4 742.6,60.4 758.9,48.2 758.9,266.5" fill="url(#eqFill)"/><polyline points="710.0,266.5 726.3,150.4 742.6,60.4 758.9,48.2" class="eq-line"/><circle cx="758.9" cy="48.2" r="4.5" class="eq-dot"/><text x="750.9" y="38.2" text-anchor="end" class="end-label">+$3,865</text>
+      <div id="nav-chart"><svg viewBox="0 0 960 320" role="img" aria-label="NAV for 2026, axis January 1 through December 31, ending at $340,000">
+      <line x1="88" y1="274.9" x2="936" y2="274.9" class="grid"/><text x="80" y="278.9" text-anchor="end" class="tick">$0</text><line x1="88" y1="217.7" x2="936" y2="217.7" class="grid"/><text x="80" y="221.7" text-anchor="end" class="tick">$250,000</text><line x1="88" y1="160.6" x2="936" y2="160.6" class="grid"/><text x="80" y="164.6" text-anchor="end" class="tick">$500,000</text><line x1="88" y1="103.4" x2="936" y2="103.4" class="grid"/><text x="80" y="107.4" text-anchor="end" class="tick">$750,000</text><line x1="88" y1="46.3" x2="936" y2="46.3" class="grid"/><text x="80" y="50.3" text-anchor="end" class="tick">$1,000,000</text>
+      <line x1="88.0" y1="28" x2="88.0" y2="284.0" class="grid"/><line x1="160.2" y1="28" x2="160.2" y2="284.0" class="grid"/><line x1="225.5" y1="28" x2="225.5" y2="284.0" class="grid"/><line x1="297.7" y1="28" x2="297.7" y2="284.0" class="grid"/><line x1="367.6" y1="28" x2="367.6" y2="284.0" class="grid"/><line x1="439.8" y1="28" x2="439.8" y2="284.0" class="grid"/><line x1="509.7" y1="28" x2="509.7" y2="284.0" class="grid"/><line x1="581.9" y1="28" x2="581.9" y2="284.0" class="grid"/><line x1="654.1" y1="28" x2="654.1" y2="284.0" class="grid"/><line x1="724.0" y1="28" x2="724.0" y2="284.0" class="grid"/><line x1="796.2" y1="28" x2="796.2" y2="284.0" class="grid"/><line x1="936.0" y1="28" x2="936.0" y2="284.0" class="grid"/>
+      <line x1="88" y1="46.3" x2="936" y2="46.3" class="nav-goal"/><text x="96" y="40.3" class="nav-goal-label">$1,000,000</text>
+      <polyline points="514.3,233.7 579.6,220.0 644.8,204.0 710.0,214.3 742.6,197.1" class="nav-line"/><circle cx="514.3" cy="233.7" r="4" class="nav-dot"/><circle cx="579.6" cy="220.0" r="4" class="nav-dot"/><circle cx="644.8" cy="204.0" r="4" class="nav-dot"/><circle cx="710.0" cy="214.3" r="4" class="nav-dot"/><circle cx="742.6" cy="197.1" r="4" class="nav-dot"/><text x="750.6" y="189.1" class="nav-end">$340,000</text>
       <text x="88.0" y="310" text-anchor="start" class="tick">1/1</text><text x="160.2" y="310" text-anchor="middle" class="tick">Feb</text><text x="225.5" y="310" text-anchor="middle" class="tick">Mar</text><text x="297.7" y="310" text-anchor="middle" class="tick">Apr</text><text x="367.6" y="310" text-anchor="middle" class="tick">May</text><text x="439.8" y="310" text-anchor="middle" class="tick">Jun</text><text x="509.7" y="310" text-anchor="middle" class="tick">Jul</text><text x="581.9" y="310" text-anchor="middle" class="tick">Aug</text><text x="654.1" y="310" text-anchor="middle" class="tick">Sep</text><text x="724.0" y="310" text-anchor="middle" class="tick">Oct</text><text x="796.2" y="310" text-anchor="middle" class="tick">Nov</text><text x="936.0" y="310" text-anchor="end" class="tick">12/31</text>
-      <text x="936" y="16" text-anchor="end" class="gap-label">66.0% gap to $1,000,000 USD · placeholder</text>
+      <text x="936" y="18" text-anchor="end" class="gap-label">66.0% gap to $1,000,000 USD · placeholder</text>
     </svg></div>
     </section>
     <section class="pair">
@@ -559,7 +573,7 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
     <section class="card">
       <p class="section-k">Open positions</p>
       <h2>Still on the book</h2>
-      <p class="note" id="open-last-note">Last is the Yahoo Finance daily close through Oct 9, 2026, snapshotted Oct 12, 2026 03:57 ET by compute_perf.py. Unrealized is (Last − entry) × shares. Risk $ is (entry − stop) × shares when the stop is below the entry. No. of R is (Last − entry) / (entry − stop) when the stop is below the entry, otherwise blank. The browser does not fetch quotes. Open marks are not included in Net P&amp;L.</p>
+      <p class="note" id="open-last-note">Last is the Yahoo Finance daily close through Oct 9, 2026, snapshotted Oct 12, 2026 04:11 ET by compute_perf.py. Unrealized is (Last − entry) × shares. Risk $ is (entry − stop) × shares when the stop is below the entry. No. of R is (Last − entry) / (entry − stop) when the stop is below the entry, otherwise blank. The browser does not fetch quotes. Open marks are not included in Net P&amp;L.</p>
       <div class="table-wrap"><table class="trades"><thead><tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>Stop</th><th>Last</th><th>Unrealized</th><th>Risk $</th><th>No. of R</th><th>Opened</th></tr></thead><tbody><tr><td class="sym">MRVL</td><td class="num">40</td><td class="num">273.90</td><td class="num">—</td><td class="num">275.28</td><td class="num pos">+$55</td><td class="num">—</td><td class="num flat">—</td><td>Oct 9, 2026</td></tr>
 <tr><td class="sym">SNDK</td><td class="num">5</td><td class="num">1,695.28</td><td class="num">1,662.00</td><td class="num">1,581.82</td><td class="num neg">−$567</td><td class="num">$166</td><td class="num neg">−3.41R</td><td>Sep 28, 2026</td></tr>
 <tr><td class="sym">PLTR</td><td class="num">70</td><td class="num">177.58</td><td class="num">—</td><td class="num">209.05</td><td class="num pos">+$2,203</td><td class="num">—</td><td class="num flat">—</td><td>Sep 4, 2026</td></tr>
@@ -596,7 +610,7 @@ table.trades td.num { text-align: right; font-variant-numeric: tabular-nums; }
 <tr><td>Oct 1, 2026</td><td class="sym">LITE</td><td>10d+</td><td class="num pos">+$2,007</td><td class="num"><span class="r-pill r-0_1">+0.15R</span></td></tr></tbody></table></div></div>
       
     </section>
-    <p class="foot">Generated Oct 12, 2026 03:57 ET by compute_perf.py. StonkJournal real book. This page does not connect to a broker and does not place trades.</p>
+    <p class="foot">Generated Oct 12, 2026 04:11 ET by compute_perf.py. StonkJournal real book. This page does not connect to a broker and does not place trades.</p>
   </main>
 <script type="application/json" id="audit-data">{"trips":[{"symbol":"LITE","entryDate":"2026-09-17","exitDate":"2026-10-01","pnl":2007.250004999998,"r":0.14727697229281722,"commission":0.0,"sell":1051.6,"stop":9.17783333,"stopSource":"fallback","hasTime":true,"holdSessions":10,"holdKey":"10d_plus","holdLabel":"10d+","timeBucket":"After hours","weekday":"Thursday","regime":"Unknown","setup":"avoid","revenge":false,"risk":13629.08249505,"late":true,"fridayAfternoon":false,"gapChase":false,"hotRsi":false,"hold10":true,"extras":{"adr":null,"rsi":null,"ema_dist_pct":null,"sma_dist_pct":null,"dollar_volume":null,"gap_pct":null,"week52_pct":null}},{"symbol":"NBIS","entryDate":"2026-09-28","exitDate":"2026-10-02","pnl":49.0,"r":0.010241040656931362,"commission":0.0,"sell":244.1,"stop":2.4165,"stopSource":"fallback","hasTime":true,"holdSessions":4,"holdKey":"2_4d","holdLabel":"2\u20134d","timeBucket":"2:30\u20134:00","weekday":"Monday","regime":"Unknown","setup":"avoid","revenge":false,"risk":4784.67,"late":true,"fridayAfternoon":false,"gapChase":false,"hotRsi":false,"hold10":false,"extras":{"adr":null,"rsi":null,"ema_dist_pct":null,"sma_dist_pct":null,"dollar_volume":null,"gap_pct":null,"week52_pct":null}},{"symbol":"META","entryDate":"2026-09-28","exitDate":"2026-10-05","pnl":363.7999999999993,"r":0.02548898851874497,"commission":0.0,"sell":739.04,"stop":7.208500000000001,"stopSource":"fallback","hasTime":true,"holdSessions":5,"holdKey":"5_9d","holdLabel":"5\u20139d","timeBucket":"2:30\u20134:00","weekday":"Monday","regime":"Unknown","setup":"avoid","revenge":false,"risk":14272.830000000002,"late":true,"fridayAfternoon":false,"gapChase":false,"hotRsi":false,"hold10":false,"extras":{"adr":null,"rsi":null,"ema_dist_pct":null,"sma_dist_pct":null,"dollar_volume":null,"gap_pct":null,"week52_pct":null}},{"symbol":"NTAP","entryDate":"2026-09-16","exitDate":"2026-10-09","pnl":1229.0000100000007,"r":0.21859731493487436,"commission":0.0,"sell":230.266667,"stop":1.8930000000000002,"stopSource":"fallback","hasTime":true,"holdSessions":17,"holdKey":"10d_plus","holdLabel":"10d+","timeBucket":"2:30\u20134:00","weekday":"Wednesday","regime":"Unknown","setup":"avoid","revenge":false,"risk":5622.21,"late":true,"fridayAfternoon":false,"gapChase":false,"hotRsi":false,"hold10":true,"extras":{"adr":null,"rsi":null,"ema_dist_pct":null,"sma_dist_pct":null,"dollar_volume":null,"gap_pct":null,"week52_pct":null}},{"symbol":"NVDA-OPT","entryDate":"2026-09-14","exitDate":"2026-10-10","pnl":216.0,"r":null,"commission":0.0,"sell":216.0,"stop":0.0,"stopSource":"fallback","hasTime":true,"holdSessions":19,"holdKey":"10d_plus","holdLabel":"10d+","timeBucket":"Pre-9:30","weekday":"Monday","regime":"Unknown","setup":"avoid","revenge":false,"risk":0.0,"late":false,"fridayAfternoon":false,"gapChase":false,"hotRsi":false,"hold10":true,"extras":{"adr":null,"rsi":null,"ema_dist_pct":null,"sma_dist_pct":null,"dollar_volume":null,"gap_pct":null,"week52_pct":null}}],"columns":["commission","datetime","price","quantity","side","stop_price","symbol"],"exitMin":"2026-10-01","exitMax":"2026-10-10","nav":[{"date":"2026-07-03","nav":180000.0,"currency":"USD","fx":1.0,"source":"placeholder"},{"date":"2026-07-31","nav":240000.0,"currency":"USD","fx":1.0,"source":"placeholder"},{"date":"2026-08-28","nav":310000.0,"currency":"USD","fx":1.0,"source":"placeholder"},{"date":"2026-09-25","nav":265000.0,"currency":"USD","fx":1.0,"source":"placeholder"},{"date":"2026-10-09","nav":340000.0,"currency":"USD","fx":1.0,"source":"placeholder"}],"navGoal":1000000.0,"chartYear":2026}</script>
 <script>
@@ -1222,37 +1236,87 @@ function ticks(ymin, ymax) {
   return out;
 }
 
-function equitySvg(points, gapText, year) {
-  const dated = (points || []).filter((point) => point && point.week).map((point) => ({
-    week: String(point.week).slice(0, 10),
-    pnl: Number(point.pnl),
-  })).sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
-  const axisYear = Number(year) || (dated.length ? Number(dated[dated.length - 1].week.slice(0, 4)) : new Date().getUTCFullYear());
-  const start = axisYear + "-01-01";
+function weeklyBars(points) {
+  const rows = (points || []).map((point) => {
+    const raw = point.week_pnl != null ? point.week_pnl : point.pnl;
+    return { week: String(point.week).slice(0, 10), pnl: Number(raw || 0) };
+  }).filter((point) => point.week && Math.abs(point.pnl) > 1e-9)
+    .sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
+  const width = 960;
+  const height = 280;
+  const padL = 88;
+  const padR = 24;
+  const padT = 28;
+  const padB = 40;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+  const values = rows.length ? rows.map((point) => point.pnl) : [0];
+  let ymin = Math.min.apply(null, [0].concat(values));
+  let ymax = Math.max.apply(null, [0].concat(values));
+  const span = ymax - ymin || 1;
+  ymin -= span * 0.12;
+  ymax += span * 0.22;
+  function yAt(v) {
+    return padT + innerH * (1 - (v - ymin) / (ymax - ymin));
+  }
+  const grid = ticks(ymin, ymax).map((tick) => {
+    const y = yAt(tick);
+    return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + y.toFixed(1) + '" class="grid"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="tick">' + esc(fmtPlainMoney(tick)) + "</text>";
+  }).join("");
+  const zeroY = yAt(0);
+  let bars = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No closed round trips in this period</text>';
+  if (rows.length) {
+    const slot = innerW / rows.length;
+    const barW = Math.min(56, slot * 0.62);
+    const step = Math.max(1, Math.floor(rows.length / 8));
+    const parts = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const center = padL + slot * (i + 0.5);
+      const y1 = yAt(rows[i].pnl);
+      const top = Math.min(zeroY, y1);
+      const barH = Math.max(2, Math.abs(y1 - zeroY));
+      const tone = rows[i].pnl >= 0 ? "up" : "dn";
+      parts.push('<rect x="' + (center - barW / 2).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" class="wk-' + tone + '"/>');
+      const labelY = rows[i].pnl >= 0 ? y1 - 8 : y1 + 14;
+      parts.push('<text x="' + center.toFixed(1) + '" y="' + labelY.toFixed(1) + '" text-anchor="middle" class="bar-amt ' + tone + '">' + esc(fmtMoney(rows[i].pnl)) + "</text>");
+      if (i % step === 0 || i === rows.length - 1) {
+        parts.push('<text x="' + center.toFixed(1) + '" y="' + (height - 12) + '" text-anchor="middle" class="tick">' + esc(fmtDate(rows[i].week, false)) + "</text>");
+      }
+    }
+    bars = parts.join("");
+  }
+  return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Weekly realized P and L">'
+    + grid
+    + '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + zeroY.toFixed(1) + '" class="zero"/>'
+    + bars
+    + "</svg>";
+}
+
+function navSvg(points, gapText, year, goal) {
+  const dated = (points || []).filter((point) => point && point.date).map((point) => ({
+    date: String(point.date).slice(0, 10),
+    nav: Number(point.nav),
+  })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const axisYear = Number(year) || (dated.length ? Number(dated[dated.length - 1].date.slice(0, 4)) : new Date().getUTCFullYear());
   const end = axisYear + "-12-31";
   const spanDays = Math.round((Date.UTC(axisYear, 11, 31) - Date.UTC(axisYear, 0, 1)) / 86400000) || 1;
   const width = 960;
   const height = 320;
   const padL = 88;
   const padR = 24;
-  const padT = 22;
+  const padT = 28;
   const padB = 36;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
-  const inYear = dated.filter((point) => Number(point.week.slice(0, 4)) === axisYear);
-  const series = [];
-  if (inYear.length) {
-    let anchor = addDays(inYear[0].week, -7);
-    if (anchor < start) anchor = start;
-    if (inYear[0].pnl !== 0) series.push({ week: anchor, pnl: 0 });
-    inYear.forEach((point) => series.push(point));
-  }
-  const values = series.length ? series.map((point) => point.pnl) : [0];
-  let ymin = Math.min.apply(null, [0].concat(values));
-  let ymax = Math.max.apply(null, [0].concat(values));
+  const inYear = dated.filter((point) => Number(point.date.slice(0, 4)) === axisYear);
+  const goalV = Number(goal || 1000000);
+  const observed = inYear.map((point) => point.nav);
+  let ymin = Math.min.apply(null, [0, goalV].concat(observed));
+  let ymax = Math.max.apply(null, [0, goalV].concat(observed));
   const span = ymax - ymin || 1;
-  ymin -= span * 0.08;
-  ymax += span * 0.12;
+  ymin -= span * 0.04;
+  ymax += span * 0.08;
   function dayIndex(iso) {
     const parts = String(iso).slice(0, 10).split("-").map(Number);
     const clamped = Math.min(Math.max(Date.UTC(parts[0], parts[1] - 1, parts[2]), Date.UTC(axisYear, 0, 1)), Date.UTC(axisYear, 11, 31));
@@ -1283,34 +1347,32 @@ function equitySvg(points, gapText, year) {
   const xEnd = xAt(end);
   vlines.push('<line x1="' + xEnd.toFixed(1) + '" y1="' + padT + '" x2="' + xEnd.toFixed(1) + '" y2="' + (height - padB).toFixed(1) + '" class="grid"/>');
   labels.push('<text x="' + xEnd.toFixed(1) + '" y="' + (height - 10) + '" text-anchor="end" class="tick">12/31</text>');
-  const zeroY = yAt(0);
-  let marker = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No closed round trips in this period</text>';
-  let endLabel = "—";
-  if (series.length) {
-    const coords = series.map((point) => [xAt(point.week), yAt(point.pnl)]);
+  const goalY = yAt(goalV);
+  const goalLine = '<line x1="' + padL + '" y1="' + goalY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + goalY.toFixed(1) + '" class="nav-goal"/>'
+    + '<text x="' + (padL + 8) + '" y="' + Math.max(padT + 12, goalY - 6).toFixed(1) + '" class="nav-goal-label">$1,000,000</text>';
+  let series = '<text x="' + (padL + innerW / 2).toFixed(1) + '" y="' + ((padT + height - padB) / 2).toFixed(1) + '" text-anchor="middle" class="tick">No NAV in this period</text>';
+  let aria = "NAV for " + axisYear + ", axis January 1 through December 31";
+  if (inYear.length) {
+    const coords = inYear.map((point) => [xAt(point.date), yAt(point.nav)]);
     const line = coords.map((pair) => pair[0].toFixed(1) + "," + pair[1].toFixed(1)).join(" ");
-    const area = coords[0][0].toFixed(1) + "," + zeroY.toFixed(1) + " " + line + " " + coords[coords.length - 1][0].toFixed(1) + "," + zeroY.toFixed(1);
+    const dots = coords.map((pair) => '<circle cx="' + pair[0].toFixed(1) + '" cy="' + pair[1].toFixed(1) + '" r="4" class="nav-dot"/>').join("");
     const endX = coords[coords.length - 1][0];
     const endY = coords[coords.length - 1][1];
-    endLabel = fmtMoney(series[series.length - 1].pnl);
-    marker = '<polygon points="' + area + '" fill="url(#eqFill)"/>'
-      + '<polyline points="' + line + '" class="eq-line"/>'
-      + '<circle cx="' + endX.toFixed(1) + '" cy="' + endY.toFixed(1) + '" r="4.5" class="eq-dot"/>'
-      + '<text x="' + (endX - 8).toFixed(1) + '" y="' + Math.max(16, endY - 10).toFixed(1) + '" text-anchor="end" class="end-label">' + esc(endLabel) + "</text>";
+    const endLabel = fmtPlainMoney(inYear[inYear.length - 1].nav);
+    series = '<polyline points="' + line + '" class="nav-line"/>' + dots
+      + '<text x="' + (endX + 8).toFixed(1) + '" y="' + Math.max(16, endY - 8).toFixed(1) + '" class="nav-end">' + esc(endLabel) + "</text>";
+    aria += ", ending at " + endLabel;
   }
-  let aria = "Weekly cumulative realized P and L for " + axisYear + ", axis January 1 through December 31";
-  if (series.length) aria += ", ending at " + endLabel;
+  const corner = gapText && gapText !== "No NAV in this period"
+    ? '<text x="' + (width - padR) + '" y="18" text-anchor="end" class="gap-label">' + esc(gapText) + "</text>"
+    : "";
   return '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(aria) + '">'
-    + "<defs><linearGradient id=\"eqFill\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">"
-    + '<stop offset="0%" stop-color="#00f0ff" stop-opacity="0.22"/>'
-    + '<stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>'
-    + "</linearGradient></defs>"
     + grid
     + vlines.join("")
-    + '<line x1="' + padL + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padR) + '" y2="' + zeroY.toFixed(1) + '" class="zero"/>'
-    + marker
+    + goalLine
+    + series
     + labels.join("")
-    + (gapText ? '<text x="' + (width - padR) + '" y="16" text-anchor="end" class="gap-label">' + esc(gapText) + "</text>" : "")
+    + corner
     + "</svg>";
 }
 
@@ -1353,7 +1415,7 @@ function winPhrase(rate) {
   return formatFixed(rate, 0) + "% win";
 }
 
-function paint(view, gapText, year) {
+function paint(view, navPoints, year, goal) {
   const net = document.getElementById("kpi-net");
   net.textContent = fmtMoney(view.net);
   net.className = "v " + moneyClass(view.net);
@@ -1387,8 +1449,13 @@ function paint(view, gapText, year) {
     trough = " Max drawdown trough " + fmtDate(view.drawdown.trough) + ".";
   }
   const axisYear = Number(year) || new Date().getUTCFullYear();
-  note.textContent = "Realized round trips whose exit falls in the selected period, summed through each Friday." + trough + " The horizontal axis is " + axisYear + ", January 1 through December 31. The gap percent is NAV versus the goal, not this curve.";
-  document.getElementById("equity-chart").innerHTML = equitySvg(view.weekly, gapText, axisYear);
+  const gapText = gapCaption(navSummary(navPoints || [], goal));
+  note.textContent = "Closed round trips whose exit falls in the selected period, summed through each Friday." + trough;
+  document.getElementById("equity-chart").innerHTML = weeklyBars(view.weekly);
+  const navNote = document.getElementById("nav-note");
+  if (navNote) navNote.textContent = "Net asset value in USD. The horizontal axis is " + axisYear + ", January 1 through December 31. The gap percent is not added to Net P&L.";
+  const navChart = document.getElementById("nav-chart");
+  if (navChart) navChart.innerHTML = navSvg(navPoints || [], gapText, axisYear, goal);
   const gap = document.getElementById("equity-gap");
   if (gap && gapText) gap.textContent = gapText;
 
@@ -1502,7 +1569,7 @@ function boot() {
     if (name !== "custom") reflect(bounds);
     const view = auditCompute(payload, bounds.start, bounds.end);
     const gapPoints = navInWindow(payload.nav || [], bounds.start, bounds.end);
-    paint(view, gapCaption(navSummary(gapPoints, payload.navGoal)), payload.chartYear);
+    paint(view, gapPoints, payload.chartYear, payload.navGoal);
     status.textContent = windowLine(bounds, view.round_trips, payload);
   }
 
@@ -1519,7 +1586,8 @@ globalThis.divergingHtml = divergingHtml;
 globalThis.navInWindow = navInWindow;
 globalThis.navSummary = navSummary;
 globalThis.gapCaption = gapCaption;
-globalThis.equitySvg = equitySvg;
+globalThis.weeklyBars = weeklyBars;
+globalThis.navSvg = navSvg;
 globalThis.auditCompute = auditCompute;
 globalThis.auditPresetBounds = auditPresetBounds;
 globalThis.auditFormat = {

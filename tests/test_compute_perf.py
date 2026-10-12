@@ -238,7 +238,7 @@ class SampleTests(unittest.TestCase):
             "Profit Factor",
             "Expectancy",
             "Max Drawdown",
-            "Weekly cumulative",
+            "Realized by week",
             "Focus",
             "Avoid",
             "Hidden leaks",
@@ -645,11 +645,23 @@ class PoolTests(unittest.TestCase):
         self.assertEqual([point["date"] for point in trail], [date(2026, 9, 25), date(2026, 10, 9)])
         label = cp.gap_caption(summary)
         self.assertEqual(label, "66.0% gap to $1,000,000 USD · placeholder")
-        chart = cp.equity_svg([{"week": date(2026, 10, 9), "pnl": 3865.05}], label, year=2026)
+        bars = cp.weekly_bars([
+            {"week": date(2026, 10, 2), "pnl": 5000, "week_pnl": 2007.25},
+            {"week": date(2026, 10, 9), "pnl": 3865.05, "week_pnl": -49},
+        ])
+        self.assertIn('class="wk-up"', bars)
+        self.assertIn('class="wk-dn"', bars)
+        self.assertIn("+$2,007", bars)
+        self.assertNotIn("1/1", bars)
+        self.assertNotIn("gap to $1,000,000", bars)
+        self.assertIn("No closed round trips in this period", cp.weekly_bars([]))
+        chart = cp.nav_svg(points, label, year=2026)
         self.assertIn("66.0% gap to $1,000,000 USD · placeholder", chart)
         self.assertIn(">1/1<", chart)
         self.assertIn(">12/31<", chart)
         self.assertIn("January 1 through December 31", chart)
+        self.assertIn('class="nav-line"', chart)
+        self.assertIn('class="nav-goal"', chart)
         self.assertNotIn("Swimming pool", chart)
         self.assertNotIn("SAMPLE", chart)
         span = (date(2026, 12, 31) - date(2026, 1, 1)).days
@@ -657,22 +669,14 @@ class PoolTests(unittest.TestCase):
         x_oct = 88 + inner * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
         x_jul = 88 + inner * (date(2026, 7, 3) - date(2026, 1, 1)).days / span
         self.assertIn(f'cx="{x_oct:.1f}"', chart)
-        self.assertLess(x_oct, 88 + inner * 0.9)
-        wide = cp.equity_svg(
-            [
-                {"week": date(2026, 7, 3), "pnl": 1000},
-                {"week": date(2026, 10, 9), "pnl": 3865.05},
-            ],
-            label,
-            year=2026,
-        )
-        self.assertIn(f"{x_jul:.1f},", wide)
-        self.assertIn(f"{x_oct:.1f},", wide)
+        self.assertIn(f'cx="{x_jul:.1f}"', chart)
         self.assertLess(x_jul + 40, x_oct)
-        empty = cp.equity_svg([], label, year=2026)
+        self.assertLess(x_oct, 88 + inner * 0.9)
+        empty = cp.nav_svg([], "No NAV in this period", year=2026)
         self.assertIn(">1/1<", empty)
         self.assertIn(">12/31<", empty)
-        self.assertIn("No closed round trips in this period", empty)
+        self.assertIn("No NAV in this period", empty)
+        self.assertNotIn("gap-label", empty)
         self.assertEqual(cp.chart_year([{"week": date(2026, 10, 9)}], [{"date": date(2026, 7, 3)}]), 2026)
 
     def test_hkd_converts_and_bad_rows_drop(self):
@@ -715,8 +719,9 @@ class PoolTests(unittest.TestCase):
             + "\nconst rows = "
             + json.dumps(payload)
             + ";\nconst week = navInWindow(rows, '2026-10-12', '2026-10-12');\n"
-            + "const chart = equitySvg([{week: '2026-10-09', pnl: 3865.05}], '66.0% gap to $1,000,000 USD · placeholder', 2026);\n"
-            + "process.stdout.write(JSON.stringify({all: navSummary(rows, 1000000), week: gapCaption(navSummary(week, 1000000)), mtd: gapCaption(navSummary(navInWindow(rows, '2026-10-01', '2026-10-12'), 1000000)), chart: chart}));"
+            + "const bars = weeklyBars([{week: '2026-10-02', pnl: 5000, week_pnl: 2007.25}, {week: '2026-10-09', pnl: 3865.05, week_pnl: -49}]);\n"
+            + "const chart = navSvg(rows, gapCaption(navSummary(rows, 1000000)), 2026, 1000000);\n"
+            + "process.stdout.write(JSON.stringify({all: navSummary(rows, 1000000), week: gapCaption(navSummary(week, 1000000)), mtd: gapCaption(navSummary(navInWindow(rows, '2026-10-01', '2026-10-12'), 1000000)), bars: bars, chart: chart}));"
         )
         proc = subprocess.run(["node", "-e", runner], capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -728,7 +733,7 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(got["week"], "No NAV in this period")
         self.assertEqual(got["mtd"], cp.gap_caption(cp.nav_summary(cp.nav_in_window(points, date(2026, 10, 1), date(2026, 10, 12)))))
         self.assertIsNone(cp.nav_summary([])["gap_pct"])
-        py_chart = cp.equity_svg([{"week": date(2026, 10, 9), "pnl": 3865.05}], "66.0% gap to $1,000,000 USD · placeholder", year=2026)
+        py_chart = cp.nav_svg(points, cp.gap_caption(summary), year=2026)
         span = (date(2026, 12, 31) - date(2026, 1, 1)).days
         x_oct = 88 + (960 - 88 - 24) * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
         marker = f'cx="{x_oct:.1f}"'
@@ -736,6 +741,17 @@ class PoolTests(unittest.TestCase):
         self.assertIn(marker, got["chart"])
         self.assertIn(">1/1<", got["chart"])
         self.assertIn(">12/31<", got["chart"])
+        self.assertIn('class="nav-goal"', got["chart"])
+        self.assertIn("66.0% gap to $1,000,000 USD · placeholder", got["chart"])
+        py_bars = cp.weekly_bars([
+            {"week": date(2026, 10, 2), "pnl": 5000, "week_pnl": 2007.25},
+            {"week": date(2026, 10, 9), "pnl": 3865.05, "week_pnl": -49},
+        ])
+        self.assertIn('class="wk-up"', got["bars"])
+        self.assertIn('class="wk-dn"', got["bars"])
+        self.assertIn('x="272.0"', py_bars)
+        self.assertIn('x="272.0"', got["bars"])
+        self.assertNotIn("1/1", got["bars"])
 
 
 def math_isinf(value) -> bool:
