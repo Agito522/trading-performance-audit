@@ -1,6 +1,11 @@
 date,amount,currency,fx_to_usd,source
-2026-07-03,180000,USD,1,placeholder
-2026-07-31,240000,USD,1,placeholder
-2026-08-28,310000,USD,1,placeholder
-2026-09-25,265000,USD,1,placeholder
-2026-10-09,340000,USD,1,placeholder
+2026-09-29,349194.56,USD,1,Portfolio_NAV_Log
+2026-09-30,366506.50,USD,1,Portfolio_NAV_Log
+2026-10-01,357258.40,USD,1,Portfolio_NAV_Log
+2026-10-02,362572.72,USD,1,Portfolio_NAV_Log
+2026-10-05,367515.54,USD,1,Portfolio_NAV_Log
+2026-10-06,365366.42,USD,1,Portfolio_NAV_Log
+2026-10-07,360440.48,USD,1,Portfolio_NAV_Log
+2026-10-09,364096.61,USD,1,Portfolio_NAV_Log
+2026-10-12,354931.92,USD,1,Portfolio_NAV_Log
+2026-10-13,390142.16,USD,1,Portfolio_NAV_Log

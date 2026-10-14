@@ -221,7 +221,7 @@ class SampleTests(unittest.TestCase):
         summary = cp.build_page(ROOT, today=date(2026, 10, 11), fetch_quotes=False)
         self.assertEqual(summary["round_trips"], 5)
         self.assertAlmostEqual(summary["net_pnl"], 3865.05, places=2)
-        self.assertAlmostEqual(summary["nav_usd"], 340000.0)
+        self.assertAlmostEqual(summary["nav_usd"], 390142.16)
         self.assertNotAlmostEqual(summary["nav_usd"], summary["net_pnl"], places=0)
         self.assertEqual(summary["open_positions"], 24)
         self.assertEqual(summary["today_pnl"], 0)
@@ -257,7 +257,7 @@ class SampleTests(unittest.TestCase):
             "MTD",
             "Last 30 days",
             "Full CSV range",
-            "66.0% gap to $1,000,000 USD",
+            "61.0% gap to $1,000,000 USD",
             ">1/1<",
             ">12/31<",
             "Yahoo Finance",
@@ -268,6 +268,11 @@ class SampleTests(unittest.TestCase):
             "10d+",
         ):
             self.assertIn(phrase, html, phrase)
+        self.assertIn('id="equity-gap">61.0% gap to $1,000,000 USD</p>', html)
+        self.assertNotIn("· placeholder</p>", html)
+        self.assertIn('"date":"2026-10-13","nav":390142.16', html)
+        self.assertIn('"source":"portfolio_nav_log"', html)
+        self.assertNotIn("2026-07-03", html)
 
 
 class PeriodFilterTests(unittest.TestCase):
@@ -620,31 +625,64 @@ class StockBarTests(unittest.TestCase):
 
 
 class PoolTests(unittest.TestCase):
-    def test_placeholder_usd_series_and_window(self):
+    def test_portfolio_nav_log_series_and_window(self):
         points = cp.load_nav(ROOT / "data" / "nav_history.csv")
         self.assertEqual([point["date"] for point in points], [
-            date(2026, 7, 3),
-            date(2026, 7, 31),
-            date(2026, 8, 28),
-            date(2026, 9, 25),
+            date(2026, 9, 29),
+            date(2026, 9, 30),
+            date(2026, 10, 1),
+            date(2026, 10, 2),
+            date(2026, 10, 5),
+            date(2026, 10, 6),
+            date(2026, 10, 7),
             date(2026, 10, 9),
+            date(2026, 10, 12),
+            date(2026, 10, 13),
         ])
-        self.assertTrue(all(point["currency"] == "USD" and point["source"] == "placeholder" for point in points))
+        self.assertTrue(all(
+            point["currency"] == "USD" and point["source"] == "portfolio_nav_log" for point in points
+        ))
+        self.assertAlmostEqual(points[-1]["nav"], 390142.16)
         summary = cp.nav_summary(points)
-        self.assertAlmostEqual(summary["latest"], 340000)
-        self.assertAlmostEqual(summary["pct"], 34.0)
-        self.assertAlmostEqual(summary["gap"], 660000)
-        self.assertAlmostEqual(summary["gap_pct"], 66.0)
-        self.assertTrue(summary["placeholder"])
+        self.assertAlmostEqual(summary["latest"], 390142.16)
+        self.assertAlmostEqual(summary["pct"], 39.014216)
+        self.assertAlmostEqual(summary["gap"], 609857.84)
+        self.assertAlmostEqual(summary["gap_pct"], 60.985784)
+        self.assertFalse(summary["placeholder"])
         self.assertFalse(summary["hkd"])
         week = cp.nav_in_window(points, *cp.preset_bounds("week", date(2026, 10, 12)))
-        self.assertEqual(week, [])
+        self.assertEqual([point["date"] for point in week], [date(2026, 10, 12)])
         month = cp.nav_in_window(points, *cp.preset_bounds("mtd", date(2026, 10, 12)))
-        self.assertEqual([point["date"] for point in month], [date(2026, 10, 9)])
+        self.assertEqual([point["date"] for point in month], [
+            date(2026, 10, 1),
+            date(2026, 10, 2),
+            date(2026, 10, 5),
+            date(2026, 10, 6),
+            date(2026, 10, 7),
+            date(2026, 10, 9),
+            date(2026, 10, 12),
+        ])
         trail = cp.nav_in_window(points, *cp.preset_bounds("d30", date(2026, 10, 12)))
-        self.assertEqual([point["date"] for point in trail], [date(2026, 9, 25), date(2026, 10, 9)])
+        self.assertEqual([point["date"] for point in trail], [
+            date(2026, 9, 29),
+            date(2026, 9, 30),
+            date(2026, 10, 1),
+            date(2026, 10, 2),
+            date(2026, 10, 5),
+            date(2026, 10, 6),
+            date(2026, 10, 7),
+            date(2026, 10, 9),
+            date(2026, 10, 12),
+        ])
         label = cp.gap_caption(summary)
-        self.assertEqual(label, "66.0% gap to $1,000,000 USD · placeholder")
+        self.assertEqual(label, "61.0% gap to $1,000,000 USD")
+        placeholder = cp.nav_summary([{
+            "date": date(2026, 10, 9),
+            "nav": 340000,
+            "currency": "USD",
+            "source": "placeholder",
+        }])
+        self.assertEqual(cp.gap_caption(placeholder), "66.0% gap to $1,000,000 USD · placeholder")
         bars = cp.weekly_bars([
             {"week": date(2026, 10, 2), "pnl": 5000, "week_pnl": 2007.25},
             {"week": date(2026, 10, 9), "pnl": 3865.05, "week_pnl": -49},
@@ -656,7 +694,10 @@ class PoolTests(unittest.TestCase):
         self.assertNotIn("gap to $1,000,000", bars)
         self.assertIn("No closed round trips in this period", cp.weekly_bars([]))
         chart = cp.nav_svg(points, label, year=2026)
-        self.assertIn("66.0% gap to $1,000,000 USD · placeholder", chart)
+        self.assertIn("61.0% gap to $1,000,000 USD", chart)
+        self.assertNotIn("placeholder", chart)
+        self.assertIn("$390,142", chart)
+        self.assertEqual(chart.count('class="nav-dot"'), 10)
         self.assertIn(">1/1<", chart)
         self.assertIn(">12/31<", chart)
         self.assertIn("January 1 through December 31", chart)
@@ -666,12 +707,12 @@ class PoolTests(unittest.TestCase):
         self.assertNotIn("SAMPLE", chart)
         span = (date(2026, 12, 31) - date(2026, 1, 1)).days
         inner = 960 - 88 - 24
-        x_oct = 88 + inner * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
-        x_jul = 88 + inner * (date(2026, 7, 3) - date(2026, 1, 1)).days / span
-        self.assertIn(f'cx="{x_oct:.1f}"', chart)
-        self.assertIn(f'cx="{x_jul:.1f}"', chart)
-        self.assertLess(x_jul + 40, x_oct)
-        self.assertLess(x_oct, 88 + inner * 0.9)
+        x_latest = 88 + inner * (date(2026, 10, 13) - date(2026, 1, 1)).days / span
+        x_first = 88 + inner * (date(2026, 9, 29) - date(2026, 1, 1)).days / span
+        self.assertIn(f'cx="{x_latest:.1f}"', chart)
+        self.assertIn(f'cx="{x_first:.1f}"', chart)
+        self.assertLess(x_first, x_latest)
+        self.assertLess(x_latest, 88 + inner * 0.9)
         empty = cp.nav_svg([], "No NAV in this period", year=2026)
         self.assertIn(">1/1<", empty)
         self.assertIn(">12/31<", empty)
@@ -729,20 +770,25 @@ class PoolTests(unittest.TestCase):
         summary = cp.nav_summary(points)
         self.assertAlmostEqual(got["all"]["latest"], summary["latest"])
         self.assertAlmostEqual(got["all"]["gap_pct"], summary["gap_pct"])
-        self.assertTrue(got["all"]["placeholder"])
-        self.assertEqual(got["week"], "No NAV in this period")
+        self.assertFalse(got["all"]["placeholder"])
+        self.assertEqual(
+            got["week"],
+            cp.gap_caption(cp.nav_summary(cp.nav_in_window(points, date(2026, 10, 12), date(2026, 10, 12)))),
+        )
+        self.assertEqual(got["week"], "64.5% gap to $1,000,000 USD")
         self.assertEqual(got["mtd"], cp.gap_caption(cp.nav_summary(cp.nav_in_window(points, date(2026, 10, 1), date(2026, 10, 12)))))
         self.assertIsNone(cp.nav_summary([])["gap_pct"])
         py_chart = cp.nav_svg(points, cp.gap_caption(summary), year=2026)
         span = (date(2026, 12, 31) - date(2026, 1, 1)).days
-        x_oct = 88 + (960 - 88 - 24) * (date(2026, 10, 9) - date(2026, 1, 1)).days / span
-        marker = f'cx="{x_oct:.1f}"'
+        x_latest = 88 + (960 - 88 - 24) * (date(2026, 10, 13) - date(2026, 1, 1)).days / span
+        marker = f'cx="{x_latest:.1f}"'
         self.assertIn(marker, py_chart)
         self.assertIn(marker, got["chart"])
         self.assertIn(">1/1<", got["chart"])
         self.assertIn(">12/31<", got["chart"])
         self.assertIn('class="nav-goal"', got["chart"])
-        self.assertIn("66.0% gap to $1,000,000 USD · placeholder", got["chart"])
+        self.assertIn("61.0% gap to $1,000,000 USD", got["chart"])
+        self.assertNotIn("placeholder", got["chart"])
         py_bars = cp.weekly_bars([
             {"week": date(2026, 10, 2), "pnl": 5000, "week_pnl": 2007.25},
             {"week": date(2026, 10, 9), "pnl": 3865.05, "week_pnl": -49},
