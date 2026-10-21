@@ -1,6 +1,6 @@
 # 2026 Trading Performance Audit
 
-A one-page night-city HUD of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is Harold’s StonkJournal (a real book, not a sample): 5 closed round trips, about +$3,865 realized, and 24 open stock lots. Open short options are in `data/open_options_note.json` and are not fills. It is not a brokerage connection, not a recommendation, and this repo never places orders or logs into IBKR.
+A one-page night-city HUD of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is Harold’s StonkJournal (a real book, not a sample): 17 closed round trips, about +$3,376 realized, and 22 open stock lots. Open short options are in `data/open_options_note.json` and are not fills. It is not a brokerage connection, not a recommendation, and this repo never places orders or logs into IBKR.
 
 Page: [https://agito522.github.io/trading-performance-audit/](https://agito522.github.io/trading-performance-audit/)
 

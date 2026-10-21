@@ -1,9 +1,17 @@
 [
   {
-    "symbol": "SSO-OPT",
+    "symbol": "TQQQ-OPT",
     "qty": 1.0,
     "avg_price": 195.0,
-    "opened_at": "2026-10-09T16:30:13.000Z",
+    "opened_at": "2026-10-16T15:51:47.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "DRAM-OPT",
+    "qty": 1.0,
+    "avg_price": 675.0,
+    "opened_at": "2026-10-13T14:26:26.000Z",
     "side": "short",
     "asset": "option"
   },
@@ -56,14 +64,6 @@
     "asset": "option"
   },
   {
-    "symbol": "UDOW-OPT",
-    "qty": 1.0,
-    "avg_price": 149.0,
-    "opened_at": "2026-09-25T09:07:53.000Z",
-    "side": "short",
-    "asset": "option"
-  },
-  {
     "symbol": "P-OPT",
     "qty": 1.0,
     "avg_price": 1340.0,
@@ -76,14 +76,6 @@
     "qty": 1.0,
     "avg_price": 135.0,
     "opened_at": "2026-09-25T08:51:33.000Z",
-    "side": "short",
-    "asset": "option"
-  },
-  {
-    "symbol": "TQQQ-OPT",
-    "qty": 1.0,
-    "avg_price": 137.0,
-    "opened_at": "2026-09-23T09:06:52.000Z",
     "side": "short",
     "asset": "option"
   },
