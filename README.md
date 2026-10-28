@@ -1,6 +1,6 @@
 # 2026 Trading Performance Audit
 
-A one-page night-city HUD of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is Harold’s StonkJournal (a real book, not a sample): 17 closed round trips, about +$3,376 realized, and 22 open stock lots. Open short options are in `data/open_options_note.json` and are not fills. It is not a brokerage connection, not a recommendation, and this repo never places orders or logs into IBKR.
+A one-page night-city HUD of a stock book. It reads fills, matches them FIFO, and writes a static page. The committed book is Harold’s StonkJournal (a real book, not a sample): 20 closed round trips, about +$2,755 realized, and 28 open stock lots. Open options are in `data/open_options_note.json` and are not fills. It is not a brokerage connection, not a recommendation, and this repo never places orders or logs into IBKR.
 
 Page: [https://agito522.github.io/trading-performance-audit/](https://agito522.github.io/trading-performance-audit/)
 
@@ -21,6 +21,17 @@ Weekly P&L is a bar chart of realized closes, summed through each Friday. It is 
 The page opens on **Full CSV range**. The control under the title — This week, MTD, Last 30 days, Full CSV range, and Custom from–to — recomputes the audit in the browser from closed FIFO round trips whose **exit** falls in that window. Net P&L stays realized; open marks are not added. This week and MTD run through today in America/New_York. Last 30 days is the 30 calendar days ending today.
 
 Telegram is a stub. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is unset, nothing is sent.
+
+## Refresh a StonkJournal CSV
+
+Replace `data/stonkjournal_source.csv`, then:
+
+```bash
+python scripts/stonkjournal_to_fills.py data/stonkjournal_source.csv --out-dir data
+python compute_perf.py
+```
+
+`scripts/stonkjournal_to_fills.py` is the encoding in `data/conversion_notes.md` (the same path as the 2026-10-11 and 2026-10-21 loads). It rewrites `data/trades.csv`, `data/open_positions.json`, and `data/open_options_note.json`. It does not change `data/nav_history.csv` or the page styling.
 
 ## Drop an IBKR CSV
 

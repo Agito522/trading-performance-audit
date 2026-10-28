@@ -1,5 +1,92 @@
 [
   {
+    "symbol": "META",
+    "qty": 2.0,
+    "avg_price": 624.81,
+    "opened_at": "2026-10-27T16:39:09.000Z"
+  },
+  {
+    "symbol": "SPGI",
+    "qty": 3.0,
+    "avg_price": 449.1,
+    "opened_at": "2026-10-27T16:32:11.000Z"
+  },
+  {
+    "symbol": "GDE",
+    "qty": 20.0,
+    "avg_price": 54.0,
+    "opened_at": "2026-10-27T16:31:27.000Z"
+  },
+  {
+    "symbol": "DELL",
+    "qty": 10.0,
+    "avg_price": 503.8383333333333,
+    "opened_at": "2026-10-01T15:58:21.000Z",
+    "stop_price": 534.33
+  },
+  {
+    "symbol": "TSLA",
+    "qty": 35.0,
+    "avg_price": 427.58,
+    "opened_at": "2026-05-12T15:38:47.000Z"
+  },
+  {
+    "symbol": "SOXL",
+    "qty": 80.0,
+    "avg_price": 121.41722222222222,
+    "opened_at": "2026-09-22T14:53:45.000Z"
+  },
+  {
+    "symbol": "AMD",
+    "qty": 10.0,
+    "avg_price": 593.5766666666667,
+    "opened_at": "2026-10-12T13:55:27.000Z",
+    "stop_price": 570.0
+  },
+  {
+    "symbol": "BE",
+    "qty": 20.0,
+    "avg_price": 248.61695652173913,
+    "opened_at": "2026-09-05T15:10:30.000Z"
+  },
+  {
+    "symbol": "MU",
+    "qty": 18.0,
+    "avg_price": 1018.84,
+    "opened_at": "2026-07-01T16:18:54.000Z"
+  },
+  {
+    "symbol": "VICR",
+    "qty": 5.0,
+    "avg_price": 259.5,
+    "opened_at": "2026-10-12T15:02:23.000Z"
+  },
+  {
+    "symbol": "EWZ",
+    "qty": 400.0,
+    "avg_price": 31.7,
+    "opened_at": "2026-10-26T13:39:38.000Z",
+    "stop_price": 30.0
+  },
+  {
+    "symbol": "TEM",
+    "qty": 60.0,
+    "avg_price": 75.75,
+    "opened_at": "2026-10-06T15:32:05.000Z"
+  },
+  {
+    "symbol": "SMTC",
+    "qty": 40.0,
+    "avg_price": 184.93,
+    "opened_at": "2026-10-09T16:21:53.000Z"
+  },
+  {
+    "symbol": "CRWD",
+    "qty": 10.0,
+    "avg_price": 255.245,
+    "opened_at": "2026-10-12T13:56:41.000Z"
+  },
+  {
     "symbol": "BMNR",
     "qty": 500.0,
     "avg_price": 24.9025,
@@ -17,12 +104,6 @@
     "avg_price": 118.19,
     "opened_at": "2026-09-03T16:12:35.000Z",
     "stop_price": 113.25
-  },
-  {
-    "symbol": "SPCX",
-    "qty": 100.0,
-    "avg_price": 163.9,
-    "opened_at": "2026-06-30T06:50:35.000Z"
   },
   {
     "symbol": "IGV",
@@ -43,19 +124,6 @@
     "opened_at": "2026-09-04T06:45:46.000Z"
   },
   {
-    "symbol": "CRWD",
-    "qty": 20.0,
-    "avg_price": 255.245,
-    "opened_at": "2026-10-12T13:56:41.000Z"
-  },
-  {
-    "symbol": "DELL",
-    "qty": 30.0,
-    "avg_price": 503.8383333333333,
-    "opened_at": "2026-10-01T15:58:21.000Z",
-    "stop_price": 534.33
-  },
-  {
     "symbol": "TQQQ",
     "qty": 180.0,
     "avg_price": 77.42111111111112,
@@ -68,54 +136,11 @@
     "opened_at": "2026-10-12T16:33:18.000Z"
   },
   {
-    "symbol": "VICR",
-    "qty": 10.0,
-    "avg_price": 259.5,
-    "opened_at": "2026-10-12T15:02:23.000Z"
-  },
-  {
-    "symbol": "AMD",
-    "qty": 15.0,
-    "avg_price": 593.5766666666667,
-    "opened_at": "2026-10-12T13:55:27.000Z",
-    "stop_price": 570.0
-  },
-  {
     "symbol": "SNDK",
     "qty": 5.0,
     "avg_price": 1695.28,
     "opened_at": "2026-09-28T15:08:58.000Z",
     "stop_price": 1662.0
-  },
-  {
-    "symbol": "SMTC",
-    "qty": 50.0,
-    "avg_price": 184.93,
-    "opened_at": "2026-10-09T16:21:53.000Z"
-  },
-  {
-    "symbol": "BE",
-    "qty": 20.0,
-    "avg_price": 259.6142105263158,
-    "opened_at": "2026-09-05T15:10:30.000Z"
-  },
-  {
-    "symbol": "SOXL",
-    "qty": 160.0,
-    "avg_price": 121.41722222222222,
-    "opened_at": "2026-09-22T14:53:45.000Z"
-  },
-  {
-    "symbol": "TEM",
-    "qty": 100.0,
-    "avg_price": 75.75,
-    "opened_at": "2026-10-06T15:32:05.000Z"
-  },
-  {
-    "symbol": "MU",
-    "qty": 20.0,
-    "avg_price": 1018.84,
-    "opened_at": "2026-07-01T16:18:54.000Z"
   },
   {
     "symbol": "ARKG",
@@ -134,5 +159,17 @@
     "qty": 20.0,
     "avg_price": 203.5,
     "opened_at": "2026-09-20T16:04:37.000Z"
+  },
+  {
+    "symbol": "PURR",
+    "qty": 500.0,
+    "avg_price": 12.04,
+    "opened_at": "2026-09-09T06:49:08.000Z"
+  },
+  {
+    "symbol": "GDX",
+    "qty": 150.0,
+    "avg_price": 98.4,
+    "opened_at": "2026-09-03T16:09:26.000Z"
   }
 ]
