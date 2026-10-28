@@ -1,5 +1,21 @@
 [
   {
+    "symbol": "AAPU-OPT",
+    "qty": 2.0,
+    "avg_price": 90.0,
+    "opened_at": "2026-10-23T14:50:08.000Z",
+    "side": "short",
+    "asset": "option"
+  },
+  {
+    "symbol": "DVN-OPT",
+    "qty": 1.0,
+    "avg_price": 127.0,
+    "opened_at": "2026-10-21T17:54:35.000Z",
+    "side": "long",
+    "asset": "option"
+  },
+  {
     "symbol": "TQQQ-OPT",
     "qty": 1.0,
     "avg_price": 195.0,
@@ -68,22 +84,6 @@
     "qty": 1.0,
     "avg_price": 1340.0,
     "opened_at": "2026-09-25T09:05:23.000Z",
-    "side": "short",
-    "asset": "option"
-  },
-  {
-    "symbol": "MAGS-OPT",
-    "qty": 1.0,
-    "avg_price": 135.0,
-    "opened_at": "2026-09-25T08:51:33.000Z",
-    "side": "short",
-    "asset": "option"
-  },
-  {
-    "symbol": "MRVL-OPT",
-    "qty": 1.0,
-    "avg_price": 731.0,
-    "opened_at": "2026-09-23T09:01:08.000Z",
     "side": "short",
     "asset": "option"
   }

@@ -219,13 +219,13 @@ class CastTests(unittest.TestCase):
 class SampleTests(unittest.TestCase):
     def test_stonkjournal_book_shape(self):
         summary = cp.build_page(ROOT, today=date(2026, 10, 11), fetch_quotes=False)
-        self.assertEqual(summary["round_trips"], 17)
-        self.assertAlmostEqual(summary["net_pnl"], 3376.35, places=2)
+        self.assertEqual(summary["round_trips"], 20)
+        self.assertAlmostEqual(summary["net_pnl"], 2755.35, places=2)
         self.assertAlmostEqual(summary["nav_usd"], 367807.46)
         self.assertNotAlmostEqual(summary["nav_usd"], summary["net_pnl"], places=0)
-        self.assertEqual(summary["open_positions"], 22)
+        self.assertEqual(summary["open_positions"], 28)
         self.assertEqual(summary["today_pnl"], 0)
-        self.assertAlmostEqual(summary["win_rate"], 64.705882, places=4)
+        self.assertAlmostEqual(summary["win_rate"], 60.0, places=4)
         self.assertIs(type(summary["net_pnl"]), float)
         html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("SAMPLE", html)
@@ -276,6 +276,32 @@ class SampleTests(unittest.TestCase):
         self.assertIn('"source":"portfolio_nav_log"', html)
         self.assertNotIn("2026-07-03", html)
 
+    def test_stonkjournal_converter_matches_committed_book(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "stonkjournal_to_fills", ROOT / "scripts" / "stonkjournal_to_fills.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rows = mod.load_journal(ROOT / "data" / "stonkjournal_source.csv")
+        fills, positions, options, skipped = mod.convert(rows)
+        self.assertEqual(len(rows), 59)
+        self.assertEqual(len(fills), 83)
+        self.assertEqual(len(positions), 28)
+        self.assertEqual(len(options), 11)
+        self.assertEqual(len(skipped), 11)
+        self.assertEqual(positions[0]["symbol"], "META")
+        self.assertEqual(positions[1]["symbol"], "SPGI")
+        self.assertEqual(positions[2]["symbol"], "GDE")
+        self.assertTrue(all(row["opened_at"].startswith("2026-10-27") for row in positions[:3]))
+        self.assertEqual({row["symbol"] for row in options if row["side"] == "long"}, {"DVN-OPT"})
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            mod.write_outputs(out, fills, positions, options)
+            for name in ("trades.csv", "open_positions.json", "open_options_note.json"):
+                self.assertEqual((out / name).read_bytes(), (ROOT / "data" / name).read_bytes(), name)
+
 
 class PeriodFilterTests(unittest.TestCase):
     @classmethod
@@ -295,7 +321,7 @@ class PeriodFilterTests(unittest.TestCase):
         self.assertEqual(self.payload["exitMax"], self.audit["closed"][-1].exit.date().isoformat())
         self.assertTrue(self.audit["open_rows"])
         self.assertTrue(all(row.get("unreal") is None for row in self.audit["open_rows"]))
-        self.assertEqual(self.audit["round_trips"], 17)
+        self.assertEqual(self.audit["round_trips"], 20)
 
     def test_markup_defaults_to_full_range(self):
         html = self.html
